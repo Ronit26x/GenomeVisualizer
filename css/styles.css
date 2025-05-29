@@ -1,0 +1,41 @@
+/* --- Global layout --- */
+body, html {
+  margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: sans-serif;
+}
+#app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: 200px 1fr 250px;
+  grid-template-areas:
+    "menu header header"
+    "menu viz info"
+    "debug debug debug";
+  height: 100%;
+}
+#menu {
+  grid-area: menu;
+  background: #f4f4f4;
+  padding: 10px;
+  border-right: 1px solid #ddd;
+  overflow-y: auto;
+}
+#viz { grid-area: viz; background: #fff; }
+#info {
+  grid-area: info;
+  background: #f9f9f9;
+  padding: 10px;
+  border-left: 1px solid #ddd;
+  overflow-y: auto;
+}
+#debug {
+  grid-area: debug;
+  background: #222;
+  color: #0f0;
+  padding: 5px;
+  font-size: 12px;
+  height: 100px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+button, input { display: block; margin-bottom: 8px; width: 100%; }
+canvas { display: block; }
