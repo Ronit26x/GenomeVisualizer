@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Graph Visualization Tool</title>
+  <style>
+    /* --- Global layout --- */
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: sans-serif;
+    }
+    #app {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      grid-template-columns: 200px 1fr 250px;
+      grid-template-areas:
+        "menu header header"
+        "menu viz info"
+        "debug debug debug";
+      height: 100%;
+    }
+    #menu {
+      grid-area: menu;
+      background: #f4f4f4;
+      padding: 10px;
+      border-right: 1px solid #ddd;
+      overflow-y: auto;
+    }
+    #viz {
+      grid-area: viz;
+      position: relative;
+      background: #fff;
+    }
+    #info {
+      grid-area: info;
+      background: #f9f9f9;
+      padding: 10px;
+      border-left: 1px solid #ddd;
+      overflow-y: auto;
+    }
+    #debug {
+      grid-area: debug;
+      background: #222;
+      color: #0f0;
+      padding: 5px;
+      font-size: 12px;
+      height: 100px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    button, input {
+      display: block;
+      margin-bottom: 8px;
+      width: 100%;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+  <!-- graphlib-dot for DOT parsing -->
+  <script src="https://unpkg.com/graphlib@2.1.8/dist/graphlib.min.js"></script>
+  <script src="https://unpkg.com/graphlib-dot@0.6.2/dist/graphlib-dot.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <div id="menu">
+      <h3>Menu</h3>
+      <input type="file" id="fileInput" accept=".dot,.gfa" />
+      <button id="genRandom">Generate Random Graph</button>
+      <button id="resetView">Return to Default View</button>
+      <button id="pinNode">Pin Selected Node</button>
+      <button id="redraw">Redraw Layout</button>
+      <button id="highlightPaths">Highlight Paths of Selected</button>
+      <button id="clearPaths">Clear Path Highlights</button>
+      <button id="removeNodes">Remove Selected Nodes</button>
+      <button id="undo">Undo</button>
+    </div>
+    <div id="viz">
+      <canvas id="canvas"></canvas>
+    </div>
+    <div id="info">
+      <h3>Information Panel</h3>
+      <div id="infoContent">Select a node or edge to see details here.</div>
+    </div>
+    <div id="debug"></div>
+  </div>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script>
+    // — DRAW WRAPPER —  
+    //  resizeCanvas() and after zoom; just runs one tick draw.
+    function draw() {
+      if (typeof ticked === 'function') ticked();
+    }
+
+    // — Helper: parse colors (arrays, "a:b" syntax) —
+    function parseColor(val, fallback) {
+      let c = Array.isArray(val) ? val[0] : val;
+      if (!c || typeof c !== 'string') return fallback;
+      c = c.trim();
+      if (!c) return fallback;
+      if (c.includes(':')) c = c.split(':')[0];
+      return c || fallback;
+    }
+
+    // — Globals & setup —
+    const canvas  = document.getElementById('canvas');
+    const ctx     = canvas.getContext('2d');
+    let transform = d3.zoomIdentity;
+
+    let simulation,
+        nodes       = [],
+        links       = [],
+        history     = [];
+    let selected    = { nodes: new Set(), edges: new Set() };
+    let pinnedNodes = new Set();
+
+    // Resize canvas to fill #viz
+    function resizeCanvas() {
+      canvas.width  = document.getElementById('viz').clientWidth;
+      canvas.height = document.getElementById('viz').clientHeight;
+      if (simulation) {
+        simulation.force(
+          'center',
+          d3.forceCenter(canvas.width / 2, canvas.height / 2)
+        );
+      }
+      draw(); // redraw immediately
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Zoom & pan
+    d3.select(canvas).call(
+      d3.zoom()
+        .scaleExtent([0.1, 10])
+        .on('zoom', (event) => {
+          transform = event.transform;
+          draw();
+        })
+    );
+
+    function logEvent(msg) {
+      document.getElementById('debug').innerText += msg + '\n';
+    }
+
+    // — 1) DOT parser w/ fallback —
+    function parseDot(text) {
+      logEvent('Parsing DOT…');
+      const g = graphlibDot.read(text);
+      const parsedNodes = g.nodes().map(id =>
+        Object.assign({ id }, g.node(id) || {})
+      );
+      let parsedLinks = g.edges().map(e =>
+        Object.assign({ source: e.v, target: e.w }, g.edge(e) || {})
+      );
+      logEvent(`  → graphlib-dot found ${parsedLinks.length} edges`);
+      if (!parsedLinks.length) {
+        const re = /([^\s;"\[\]]+)\s*(--|->)\s*([^\s;"\[\]]+)(?:\s*\[([^\]]+)\])?;/g;
+        let m, cnt = 0;
+        while ((m = re.exec(text))) {
+          parsedLinks.push({
+            source: m[1].replace(/^"|"$/g, ''),
+            target: m[3].replace(/^"|"$/g, '')
+          });
+          cnt++;
+        }
+        logEvent(`  → fallback parsed ${cnt} edges`);
+      }
+      return { nodes: parsedNodes, links: parsedLinks };
+    }
+
+    // — 2) GFA parser (unchanged) —
+    // — Typed parser for GFA optional fields —
+    function parseTyped(type, val) {
+      switch (type) {
+        case 'i':
+          return parseInt(val, 10);
+        case 'f':
+          return parseFloat(val);
+        case 'Z': // string
+        case 'H': // hex string
+          return val;
+        case 'B': // array: subtype=<val[0]>, then comma‑sep
+          const sub = val[0];
+          return val
+            .slice(2)
+            .split(',')
+            .map(v => parseTyped(sub, v));
+        default:
+          return val;
+      }
+    }
+
+    // — Enhanced GFA parser —
+    function parseGfa(text) {
+      const nodes = [];
+      const links = [];
+      const seen = new Set();  // to dedupe "A→B" vs "A→B"  
+
+      text.split(/\r?\n/).forEach(line => {
+        if (!line || line.startsWith('#')) return;
+        const cols = line.split('\t');
+        const tag  = cols[0];
+
+        if (tag === 'S') {
+          // S <tab> id <tab> seq <tab> ... 
+          const id  = cols[1];
+          const seq = cols[2] || '';
+          nodes.push({ id, seq, length: seq.length });
+        }
+        else if (tag === 'L' || tag === 'E') {
+          // explicit link (GFA1 L or GFA2 E)
+          const [, src, fromOri, tgt, toOri, overlap] = cols;
+          const key = `${src}→${tgt}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            links.push({ source: src, target: tgt, overlap, fromOri, toOri });
+          }
+        }
+        else if (tag === 'P') {
+          // path: P <tab> name <tab> seg1+,seg2-,seg3+ <tab> cigar1,cigar2,...
+          const segs = cols[2].split(',').map(s => s.replace(/[-+]$/, ''));
+          for (let i = 0; i+1 < segs.length; i++) {
+            const src = segs[i],
+                  tgt = segs[i+1],
+                  key = `${src}→${tgt}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              links.push({ source: src, target: tgt, viaPath: cols[1] });
+            }
+          }
+        }
+      });
+
+    console.log(`Parsed GFA: ${nodes.length} segments, ${links.length} links`);
+    return { nodes, links };
+  }
+
+
+    // — 3) Dispatcher —
+    function parseGraph(text, format) {
+      logEvent('Parsing ' + format + ' graph');
+
+      // ─── CONTENT SNIFFING ───
+      // if it looks like GFA (header or segment line), force GFA parser
+      if (format === 'dot' && (/^H\t|^S\t/m).test(text)) {
+        logEvent('→ Detected GFA content despite .dot; switching to GFA parser');
+        format = 'gfa';
+      }
+
+      let parsed;
+      if (format === 'dot') {
+        parsed = parseDot(text);
+      } else if (format === 'gfa') {
+        parsed = parseGfa(text);
+      } else {
+        logEvent('Unsupported format: ' + format);
+        return;
+      }
+
+      // ─── FILTER OUT BAD LINKS ───
+      // drop any link whose source or target isn’t in the node list
+      const nodeSet = new Set(parsed.nodes.map(n => n.id));
+      parsed.links = parsed.links.filter(l =>
+        nodeSet.has(l.source) && nodeSet.has(l.target)
+      );
+
+      nodes = parsed.nodes;
+      links = parsed.links;
+      startSimulation();
+    }
+
+    // — 4) File I/O & Random —
+    document.getElementById('fileInput').addEventListener('change', e => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () =>
+        parseGraph(
+          r.result,
+          f.name.toLowerCase().endsWith('.gfa') ? 'gfa' : 'dot'
+        );
+      r.readAsText(f);
+    });
+
+    document.getElementById('genRandom').onclick = () => {
+      const N = 50;
+      nodes = d3.range(N).map(i => ({ id: i }));
+      links = d3.range(N - 1).map(i => ({ source: i, target: i + 1 }));
+      startSimulation();
+    };
+
+    // — Pin, Redraw, Reset & Undo —
+    document.getElementById('resetView').onclick = () =>
+      d3.select(canvas).call(d3.zoom().transform, d3.zoomIdentity);
+
+    document.getElementById('pinNode').onclick = () => {
+      nodes.forEach(d => {
+        if (selected.nodes.has(d.id)) {
+          d.fx = d.x;
+          d.fy = d.y;
+          pinnedNodes.add(d.id);
+        }
+      });
+      simulation.alphaTarget(0.1).restart();
+    };
+
+    document.getElementById('redraw').onclick   = startSimulation;
+    document.getElementById('undo').onclick     = () => {
+      if (history.length < 2) return;
+      history.pop();
+      const prev = history.pop();
+      nodes = prev.nodes;
+      links = prev.links;
+      startSimulation();
+    };
+
+    // — 5) Start and tick simulation —
+    function startSimulation() {
+      logEvent(`Rendering graph: ${nodes.length} nodes, ${links.length} edges`);
+      history.push({
+        nodes: JSON.parse(JSON.stringify(nodes)),
+        links: JSON.parse(JSON.stringify(links))
+      });
+      if (history.length > 20) history.shift();
+
+      if (simulation) simulation.stop();
+      simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(50))
+        .force('charge', d3.forceManyBody().strength(-100))
+        .force('center', d3.forceCenter(canvas.width / 2, canvas.height / 2))
+        .on('tick', ticked);
+
+      ticked();
+    }
+
+    // — 6) Draw on canvas each tick —
+    function ticked() {
+      // 1) Clear the entire canvas (in device pixels)
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      // identity transform
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
+
+      // 2) Apply current zoom/pan transform
+      ctx.save();
+      ctx.translate(transform.x, transform.y);
+      ctx.scale(transform.k, transform.k);
+
+      // — draw edges —
+      links.forEach(d => {
+        ctx.beginPath();
+        ctx.strokeStyle = parseColor(d.color, '#999');
+        ctx.lineWidth = +d.penwidth || 1;
+        if (d.style === 'dashed') ctx.setLineDash([4, 2]);
+        else if (d.style === 'dotted') ctx.setLineDash([1, 2]);
+        else ctx.setLineDash([]);
+        ctx.moveTo(d.source.x, d.source.y);
+        ctx.lineTo(d.target.x, d.target.y);
+        ctx.stroke();
+      });
+
+      // — draw nodes —
+      nodes.forEach(d => {
+        const r = d.penwidth ? 4 + +d.penwidth : 8;
+        // fill
+        ctx.beginPath();
+        ctx.fillStyle = parseColor(d.fillcolor, '#69b3a2');
+        ctx.arc(d.x, d.y, r, 0, 2 * Math.PI);
+        ctx.fill();
+        // stroke
+        ctx.beginPath();
+        const isPinned = pinnedNodes.has(d.id);
+        ctx.strokeStyle = isPinned
+          ? 'orange'
+          : parseColor(d.color, '#333');
+        ctx.lineWidth = isPinned ? 3 : (+d.penwidth || 1);
+        if (d.style === 'dashed') ctx.setLineDash([4, 2]);
+        else if (d.style === 'dotted') ctx.setLineDash([1, 2]);
+        else ctx.setLineDash([]);
+        ctx.arc(d.x, d.y, r, 0, 2 * Math.PI);
+        ctx.stroke();
+      });
+
+      ctx.restore();
+    }
+
+    // — 7) Node selection —
+    canvas.addEventListener('click', evt => {
+      const rect = canvas.getBoundingClientRect();
+      const x = (evt.clientX - rect.left - transform.x) / transform.k;
+      const y = (evt.clientY - rect.top - transform.y) / transform.k;
+      // Find closest node within radius 10
+      let found = null;
+      let minD = Infinity;
+      nodes.forEach(d => {
+        const dx = d.x - x;
+        const dy = d.y - y;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 < 100 && dist2 < minD) {
+          minD = dist2;
+          found = d;
+        }
+      });
+      if (found) {
+        selected.nodes.clear();
+        selected.nodes.add(found.id);
+        document.getElementById('infoContent').innerHTML =
+          `<strong>Node ${found.id}</strong><pre>${JSON.stringify(
+            found,
+            null,
+            2
+          )}</pre>`;
+        draw();
+      }
+    });
+
+    // — 8) Canvas pointer‑drag to move nodes —
+    let dragNode = null;
+    function screenToSim(px, py) {
+      return {
+        x: (px - transform.x) / transform.k,
+        y: (py - transform.y) / transform.k
+      };
+    }
+    canvas.addEventListener('pointerdown', e => {
+      const r = canvas.getBoundingClientRect();
+      const { x, y } = screenToSim(e.clientX - r.left, e.clientY - r.top);
+      dragNode = nodes.find(d => {
+        const dx = d.x - x;
+        const dy = d.y - y;
+        const rr = d.penwidth ? 4 + +d.penwidth : 8;
+        return dx * dx + dy * dy < rr * rr;
+      });
+      if (dragNode) {
+        simulation.alphaTarget(0.3).restart();
+        dragNode.fx = x;
+        dragNode.fy = y;
+        e.preventDefault();
+      }
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (!dragNode) return;
+      const r = canvas.getBoundingClientRect();
+      const { x, y } = screenToSim(e.clientX - r.left, e.clientY - r.top);
+      dragNode.fx = x;
+      dragNode.fy = y;
+      e.preventDefault();
+    });
+    function endDrag() {
+      if (!dragNode) return;
+      dragNode.fx = null;
+      dragNode.fy = null;
+      simulation.alphaTarget(0);
+      dragNode = null;
+    }
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointerleave', endDrag);
+
+    // initial render
+    startSimulation();
+  </script>
+</body>
+</html>
