@@ -13,7 +13,8 @@ function parseColor(val, fallback) {
 export function clearCanvas(ctx, canvas) {
   ctx.save();
   ctx.setTransform(1,0,0,1,0,0);
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
   ctx.restore();
 }
 
@@ -33,6 +34,11 @@ export function drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, sel
 // RENAMED: Original rendering logic for DOT graphs
 function drawDotGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected) {
   ctx.save();
+  
+  // Clear background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
   ctx.translate(transform.x, transform.y);
   ctx.scale(transform.k, transform.k);
 
@@ -60,10 +66,13 @@ function drawDotGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selecte
     // stroke
     ctx.beginPath();
     const isPinned = pinnedNodes.has(d.id);
-    ctx.strokeStyle = isPinned
+    const isSelected = selected && selected.nodes && selected.nodes.has(d.id);
+    ctx.strokeStyle = isSelected 
+      ? 'red'
+      : isPinned
       ? 'orange'
       : parseColor(d.color, '#333');
-    ctx.lineWidth = isPinned ? 3 : (+d.penwidth||1);
+    ctx.lineWidth = (isPinned || isSelected) ? 3 : (+d.penwidth||1);
     if (d.style==='dashed') ctx.setLineDash([4,2]);
     else if (d.style==='dotted') ctx.setLineDash([1,2]);
     else ctx.setLineDash([]);

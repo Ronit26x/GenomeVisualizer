@@ -10,7 +10,8 @@ export function setupUI({
   onClearPaths,
   onRemoveNodes,
   onUndo,
-  onSelectNode
+  onSelectNode,
+  onScaleChange
 }) {
   document.getElementById('fileInput')
     .addEventListener('change', e => {
@@ -32,4 +33,22 @@ export function setupUI({
     d3.select(canvas).call(d3.zoom().transform, d3.zoomIdentity);
 
   canvas.addEventListener('click', onSelectNode);
+  
+  // GFA scale control
+  const scaleSlider = document.getElementById('nodeScale');
+  const scaleValue = document.getElementById('scaleValue');
+  if (scaleSlider && onScaleChange) {
+    scaleSlider.addEventListener('input', e => {
+      const scale = parseFloat(e.target.value);
+      scaleValue.textContent = scale.toFixed(1);
+      onScaleChange(scale);
+    });
+  }
+}
+
+export function showGfaControls(show) {
+  const gfaControls = document.getElementById('gfaControls');
+  if (gfaControls) {
+    gfaControls.style.display = show ? 'block' : 'none';
+  }
 }
