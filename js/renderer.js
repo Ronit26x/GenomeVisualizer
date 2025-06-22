@@ -1,6 +1,8 @@
 // renderer.js
 
-// color helper for Graphlib‐style values
+import { drawGfaGraph } from './gfa-renderer.js'; // NEW import
+
+// color helper for Graphlib‐style values (UNCHANGED)
 function parseColor(val, fallback) {
   let c = Array.isArray(val) ? val[0] : val;
   if (!c || typeof c !== 'string') return fallback;
@@ -15,8 +17,21 @@ export function clearCanvas(ctx, canvas) {
   ctx.restore();
 }
 
-export function drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes) {
+// NEW: Main draw function that routes between DOT and GFA renderers
+export function drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, format = 'dot') {
   clearCanvas(ctx, canvas);
+  
+  if (format === 'gfa') {
+    // Use Bandage-style GFA renderer
+    drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes);
+  } else {
+    // Use original DOT renderer
+    drawDotGraph(ctx, canvas, transform, nodes, links, pinnedNodes);
+  }
+}
+
+// RENAMED: Original rendering logic for DOT graphs
+function drawDotGraph(ctx, canvas, transform, nodes, links, pinnedNodes) {
   ctx.save();
   ctx.translate(transform.x, transform.y);
   ctx.scale(transform.k, transform.k);

@@ -9,6 +9,7 @@ const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 let transform = d3.zoomIdentity;
 let simulation, nodes = [], links = [], history = [];
+let currentFormat = 'dot'; // NEW: track current format
 const selected    = { nodes: new Set(), edges: new Set() };
 const pinnedNodes = new Set();
 
@@ -25,7 +26,7 @@ function resizeCanvas() {
       d3.forceCenter(canvas.width/2, canvas.height/2)
     );
   }
-  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes);
+  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, currentFormat); // CHANGED: pass format
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -35,7 +36,7 @@ d3.select(canvas).call(
     .scaleExtent([0.01, 10])
     .on('zoom', ({transform: t}) => {
       transform = t;
-      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes);
+      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, currentFormat); // CHANGED: pass format
     })
 );
 
@@ -51,7 +52,7 @@ function startSimulation() {
   simulation = createSimulation(
     nodes, links,
     canvas.width, canvas.height,
-    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes)
+    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, currentFormat) // CHANGED: pass format
   );
 }
 
@@ -61,6 +62,7 @@ function parseGraph(text, name) {
     logEvent('→ Detected GFA content despite .dot; switching');
     fmt = 'gfa';
   }
+  currentFormat = fmt; // NEW: store format
   logEvent(`Parsing ${fmt} graph`);
   const parsed = fmt==='dot'
     ? parseDot(text, logEvent)
@@ -73,6 +75,7 @@ function parseGraph(text, name) {
 }
 
 function generateRandom() {
+  currentFormat = 'dot'; // NEW: set format for random
   nodes = d3.range(50).map(i=>({id:i}));
   links = d3.range(49).map(i=>({source:i,target:i+1}));
   startSimulation();
@@ -127,7 +130,7 @@ function selectNode(evt) {
     selected.nodes.add(found.id);
     document.getElementById('infoContent').innerHTML =
       `<strong>Node ${found.id}</strong><pre>${JSON.stringify(found,null,2)}</pre>`;
-    drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes);
+    drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, currentFormat); // CHANGED: pass format
   }
 }
 
