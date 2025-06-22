@@ -18,20 +18,20 @@ export function clearCanvas(ctx, canvas) {
 }
 
 // NEW: Main draw function that routes between DOT and GFA renderers
-export function drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, format = 'dot') {
+export function drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, format = 'dot') {
   clearCanvas(ctx, canvas);
   
   if (format === 'gfa') {
     // Use Bandage-style GFA renderer
-    drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes);
+    drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected);
   } else {
     // Use original DOT renderer
-    drawDotGraph(ctx, canvas, transform, nodes, links, pinnedNodes);
+    drawDotGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected);
   }
 }
 
 // RENAMED: Original rendering logic for DOT graphs
-function drawDotGraph(ctx, canvas, transform, nodes, links, pinnedNodes) {
+function drawDotGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected) {
   ctx.save();
   ctx.translate(transform.x, transform.y);
   ctx.scale(transform.k, transform.k);

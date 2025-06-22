@@ -26,7 +26,7 @@ function resizeCanvas() {
       d3.forceCenter(canvas.width/2, canvas.height/2)
     );
   }
-  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, currentFormat); // CHANGED: pass format
+  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat); // CHANGED: pass selected
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -36,7 +36,7 @@ d3.select(canvas).call(
     .scaleExtent([0.01, 10])
     .on('zoom', ({transform: t}) => {
       transform = t;
-      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, currentFormat); // CHANGED: pass format
+      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat); // CHANGED: pass selected
     })
 );
 
@@ -52,7 +52,7 @@ function startSimulation() {
   simulation = createSimulation(
     nodes, links,
     canvas.width, canvas.height,
-    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, currentFormat) // CHANGED: pass format
+    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat) // CHANGED: pass selected
   );
 }
 
@@ -118,19 +118,34 @@ function selectNode(evt) {
   const rect = canvas.getBoundingClientRect();
   const x = (evt.clientX-rect.left  - transform.x)/transform.k;
   const y = (evt.clientY-rect.top   - transform.y)/transform.k;
-  let found=null, minD=Infinity;
-  nodes.forEach(d=>{
-    const dx=d.x-x, dy=d.y-y, dist2=dx*dx+dy*dy;
-    if(dist2<100&&dist2<minD){
-      minD=dist2; found=d;
+  let found=null;
+  
+  // For GFA format, use the GFA node hit detection
+  if (currentFormat === 'gfa' && nodes._gfaNodes) {
+    for (let i = 0; i < nodes.length; i++) {
+      const gfaNode = nodes._gfaNodes[i];
+      if (gfaNode && gfaNode.contains(x, y)) {
+        found = nodes[i];
+        break;
+      }
     }
-  });
+  } else {
+    // For DOT format, use circular hit detection
+    let minD=Infinity;
+    nodes.forEach(d=>{
+      const dx=d.x-x, dy=d.y-y, dist2=dx*dx+dy*dy;
+      if(dist2<100&&dist2<minD){
+        minD=dist2; found=d;
+      }
+    });
+  }
+  
   if(found){
     selected.nodes.clear();
     selected.nodes.add(found.id);
     document.getElementById('infoContent').innerHTML =
       `<strong>Node ${found.id}</strong><pre>${JSON.stringify(found,null,2)}</pre>`;
-    drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, currentFormat); // CHANGED: pass format
+    drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat);
   }
 }
 
@@ -142,10 +157,25 @@ function screenToSim(px,py){
 canvas.addEventListener('pointerdown', e=>{
   const r = canvas.getBoundingClientRect();
   const {x,y} = screenToSim(e.clientX-r.left, e.clientY-r.top);
-  dragNode = nodes.find(d=>{
-    const dx=d.x-x, dy=d.y-y, rr=d.penwidth?4+ +d.penwidth:8;
-    return dx*dx+dy*dy<rr*rr;
-  });
+  
+  // For GFA format, use the GFA node hit detection
+  if (currentFormat === 'gfa' && nodes._gfaNodes) {
+    dragNode = null;
+    for (let i = 0; i < nodes.length; i++) {
+      const gfaNode = nodes._gfaNodes[i];
+      if (gfaNode && gfaNode.contains(x, y)) {
+        dragNode = nodes[i];
+        break;
+      }
+    }
+  } else {
+    // For DOT format, use circular hit detection
+    dragNode = nodes.find(d=>{
+      const dx=d.x-x, dy=d.y-y, rr=d.penwidth?4+ +d.penwidth:8;
+      return dx*dx+dy*dy<rr*rr;
+    });
+  }
+  
   if(dragNode){
     simulation.alphaTarget(0.3).restart();
     dragNode.fx=x; dragNode.fy=y;

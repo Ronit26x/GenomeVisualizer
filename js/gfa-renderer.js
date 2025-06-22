@@ -114,15 +114,15 @@ class GfaNode {
     return Math.sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY));
   }
 
-  draw(ctx, transform) {
+  draw(ctx, transform, isSelected = false) {
     if (this.segments.length < 2) return;
 
     ctx.save();
     
     const width = this.width * transform.k;
     ctx.fillStyle = this.getColor();
-    ctx.strokeStyle = '#333333';
-    ctx.lineWidth = 1 * transform.k;
+    ctx.strokeStyle = isSelected ? '#ff0000' : '#333333';
+    ctx.lineWidth = (isSelected ? 3 : 1) * transform.k;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
@@ -228,7 +228,7 @@ class GfaNode {
 }
 
 // Main GFA rendering function
-export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes) {
+export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected) {
   // Create GFA node objects if not already created
   if (!nodes._gfaNodes) {
     nodes._gfaNodes = nodes.map(nodeData => new GfaNode(nodeData));
@@ -258,7 +258,8 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes) 
   
   // Draw nodes
   nodes._gfaNodes.forEach(gfaNode => {
-    gfaNode.draw(ctx, transform);
+    const isSelected = selected && selected.nodes && selected.nodes.has(gfaNode.id);
+    gfaNode.draw(ctx, transform, isSelected);
   });
   
   ctx.restore();
