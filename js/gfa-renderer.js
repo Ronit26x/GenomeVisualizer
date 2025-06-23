@@ -151,7 +151,7 @@ class GfaNode {
     return Math.sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY));
   }
 
-  draw(ctx, transform, isSelected = false, isPinned = false) {
+  draw(ctx, transform, isSelected = false, isPinned = false, isHighlighted = false) {
     if (this.segments.length < 2) return;
 
     ctx.save();
@@ -160,9 +160,16 @@ class GfaNode {
     const minWidth = 2; // Minimum visible width
     const effectiveWidth = Math.max(width, minWidth);
     
-    ctx.fillStyle = this.getColor();
-    ctx.strokeStyle = isSelected ? '#ff0000' : (isPinned ? '#ff8800' : '#000000');
-    ctx.lineWidth = Math.max(0.5, (isSelected ? 2 : 0.5) * transform.k);
+    // Determine colors based on state
+    if (isHighlighted) {
+      ctx.fillStyle = '#ff6b6b';  // Bright red for highlighted
+      ctx.strokeStyle = '#cc0000';  // Darker red border
+      ctx.lineWidth = Math.max(0.5, 3 * transform.k);
+    } else {
+      ctx.fillStyle = this.getColor();
+      ctx.strokeStyle = isSelected ? '#ff0000' : (isPinned ? '#ff8800' : '#000000');
+      ctx.lineWidth = Math.max(0.5, (isSelected ? 2 : 0.5) * transform.k);
+    }
     
     // Build the path
     const path = new Path2D();
@@ -201,9 +208,10 @@ class GfaNode {
     // Start from the top of the first segment
     const firstX = this.segments[0].x * transform.k + transform.x;
     const firstY = this.segments[0].y * transform.k + transform.y;
+    const nodeWidth = isHighlighted ? effectiveWidth * 1.5 : effectiveWidth;
     path.moveTo(
-      firstX + normals[0].x * effectiveWidth / 2,
-      firstY + normals[0].y * effectiveWidth / 2
+      firstX + normals[0].x * nodeWidth / 2,
+      firstY + normals[0].y * nodeWidth / 2
     );
     
     // Draw top edge
@@ -211,8 +219,8 @@ class GfaNode {
       const x = this.segments[i].x * transform.k + transform.x;
       const y = this.segments[i].y * transform.k + transform.y;
       path.lineTo(
-        x + normals[i].x * effectiveWidth / 2,
-        y + normals[i].y * effectiveWidth / 2
+        x + normals[i].x * nodeWidth / 2,
+        y + normals[i].y * nodeWidth / 2
       );
     }
     
@@ -229,7 +237,7 @@ class GfaNode {
       const len = Math.sqrt(dx * dx + dy * dy);
       
       if (len > 0) {
-        const arrowLen = Math.min(effectiveWidth * 1.5, len * 0.5);
+        const arrowLen = Math.min(nodeWidth * 1.5, len * 0.5);
         const arrowX = dx / len * arrowLen;
         const arrowY = dy / len * arrowLen;
         
@@ -238,8 +246,8 @@ class GfaNode {
         
         // Arrow bottom
         path.lineTo(
-          lastX - normals[lastIdx].x * effectiveWidth / 2,
-          lastY - normals[lastIdx].y * effectiveWidth / 2
+          lastX - normals[lastIdx].x * nodeWidth / 2,
+          lastY - normals[lastIdx].y * nodeWidth / 2
         );
       }
     }
@@ -249,8 +257,8 @@ class GfaNode {
       const x = this.segments[i].x * transform.k + transform.x;
       const y = this.segments[i].y * transform.k + transform.y;
       path.lineTo(
-        x - normals[i].x * effectiveWidth / 2,
-        y - normals[i].y * effectiveWidth / 2
+        x - normals[i].x * nodeWidth / 2,
+        y - normals[i].y * nodeWidth / 2
       );
     }
     
@@ -307,7 +315,7 @@ class GfaNode {
 }
 
 // Main GFA rendering function
-export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, scaleFactor = 1.0) {
+export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, highlightedPath = null, scaleFactor = 1.0) {
   // Create GFA node objects if not already created or if scale changed
   if (!nodes._gfaNodes || nodes._lastScale !== scaleFactor) {
     // Calculate auto-scaling factor first
@@ -339,12 +347,13 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
   
   // Draw edges first (behind nodes)
   ctx.globalAlpha = 0.6;
-  links.forEach(link => {
+  links.forEach((link, index) => {
     const sourceGfaNode = nodes._gfaNodes.find(n => n.id === (link.source.id || link.source));
     const targetGfaNode = nodes._gfaNodes.find(n => n.id === (link.target.id || link.target));
     
     if (sourceGfaNode && targetGfaNode) {
-      drawGfaEdge(ctx, transform, sourceGfaNode, targetGfaNode, link);
+      const isHighlighted = highlightedPath && highlightedPath.edges && highlightedPath.edges.has(index);
+      drawGfaEdge(ctx, transform, sourceGfaNode, targetGfaNode, link, isHighlighted);
     }
   });
   ctx.globalAlpha = 1.0;
@@ -353,22 +362,28 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
   nodes._gfaNodes.forEach(gfaNode => {
     const isSelected = selected && selected.nodes && selected.nodes.has(gfaNode.id);
     const isPinned = pinnedNodes && pinnedNodes.has(gfaNode.id);
-    gfaNode.draw(ctx, transform, isSelected, isPinned);
+    const isHighlighted = highlightedPath && highlightedPath.nodes && highlightedPath.nodes.has(String(gfaNode.id));
+    gfaNode.draw(ctx, transform, isSelected, isPinned, isHighlighted);
   });
   
   ctx.restore();
 }
 
 // Draw GFA edge with proper end-to-end connection
-function drawGfaEdge(ctx, transform, sourceNode, targetNode, linkData) {
+function drawGfaEdge(ctx, transform, sourceNode, targetNode, linkData, isHighlighted = false) {
   const start = sourceNode.getEndPoint();
   const end = targetNode.getStartPoint();
   
   ctx.save();
   
   // Edge styling
-  ctx.strokeStyle = linkData.color || '#333333';
-  ctx.lineWidth = Math.max(1, 2 * transform.k);
+  if (isHighlighted) {
+    ctx.strokeStyle = '#ff6b6b';  // Bright red for highlighted
+    ctx.lineWidth = Math.max(1, 6 * transform.k);
+  } else {
+    ctx.strokeStyle = linkData.color || '#333333';
+    ctx.lineWidth = Math.max(1, 2 * transform.k);
+  }
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   

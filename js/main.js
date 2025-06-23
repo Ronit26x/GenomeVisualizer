@@ -12,6 +12,7 @@ let simulation, nodes = [], links = [], history = [];
 let currentFormat = 'dot'; // NEW: track current format
 const selected    = { nodes: new Set(), edges: new Set() };
 const pinnedNodes = new Set();
+const highlightedPath = { nodes: new Set(), edges: new Set() }; // NEW: track highlighted path
 
 function logEvent(msg) {
   document.getElementById('debug').innerText += msg + '\n';
@@ -26,7 +27,7 @@ function resizeCanvas() {
       d3.forceCenter(canvas.width/2, canvas.height/2)
     );
   }
-  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat); // CHANGED: pass selected
+  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath); // CHANGED: pass highlightedPath
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -36,7 +37,7 @@ d3.select(canvas).call(
     .scaleExtent([0.01, 10])
     .on('zoom', ({transform: t}) => {
       transform = t;
-      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat); // CHANGED: pass selected
+      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath); // CHANGED: pass highlightedPath
     })
 );
 
@@ -52,7 +53,7 @@ function startSimulation() {
   simulation = createSimulation(
     nodes, links,
     canvas.width, canvas.height,
-    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat) // CHANGED: pass selected
+    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath) // CHANGED: pass highlightedPath
   );
 }
 
@@ -91,12 +92,57 @@ function pinSelected() {
   simulation.alpha(0.1).restart();
 }
 
-function highlightPaths() {
-  logEvent('Highlight Paths clicked (TODO)');
+function highlightPaths(sequence) {
+  // Clear previous highlights
+  highlightedPath.nodes.clear();
+  highlightedPath.edges.clear();
+  
+  if (!sequence || !sequence.trim()) {
+    drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
+    return;
+  }
+  
+  // Parse the sequence
+  const nodeIds = sequence.split(',').map(id => id.trim());
+  
+  // Validate nodes exist
+  const nodeMap = new Map(nodes.map(n => [String(n.id), n]));
+  const validNodes = nodeIds.filter(id => nodeMap.has(id));
+  
+  if (validNodes.length === 0) {
+    logEvent('No valid nodes in sequence');
+    return;
+  }
+  
+  // Highlight nodes
+  validNodes.forEach(id => highlightedPath.nodes.add(id));
+  
+  // Highlight edges between consecutive nodes
+  for (let i = 0; i < validNodes.length - 1; i++) {
+    const sourceId = validNodes[i];
+    const targetId = validNodes[i + 1];
+    
+    // Find edge between these nodes
+    links.forEach((link, index) => {
+      const linkSourceId = String(link.source.id || link.source);
+      const linkTargetId = String(link.target.id || link.target);
+      
+      if ((linkSourceId === sourceId && linkTargetId === targetId) ||
+          (linkSourceId === targetId && linkTargetId === sourceId)) {
+        highlightedPath.edges.add(index);
+      }
+    });
+  }
+  
+  logEvent(`Highlighted path: ${validNodes.join(' → ')}`);
+  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
 
 function clearPaths() {
-  logEvent('Clear Path Highlights clicked');
+  highlightedPath.nodes.clear();
+  highlightedPath.edges.clear();
+  logEvent('Cleared path highlights');
+  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
 
 function removeSelected() {
@@ -145,7 +191,7 @@ function selectNode(evt) {
     selected.nodes.add(found.id);
     document.getElementById('infoContent').innerHTML =
       `<strong>Node ${found.id}</strong><pre>${JSON.stringify(found,null,2)}</pre>`;
-    drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat);
+    drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
   }
 }
 
@@ -204,7 +250,7 @@ setupUI({
   onGenerate:    generateRandom,
   onPin:         pinSelected,
   onRedraw:      startSimulation,
-  onHighlightPaths: highlightPaths,
+  onHighlightPath: highlightPaths,  // CHANGED: new handler
   onClearPaths:     clearPaths,
   onRemoveNodes:    removeSelected,
   onUndo:            undo,

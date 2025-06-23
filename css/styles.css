@@ -38,4 +38,18 @@ body, html {
   white-space: pre-wrap;
 }
 button, input { display: block; margin-bottom: 8px; width: 100%; }
+#pathInput { 
+  margin: 15px 0; 
+  padding: 10px 0; 
+  border-top: 1px solid #ddd; 
+  border-bottom: 1px solid #ddd;
+}
+#pathInput label { 
+  font-weight: bold; 
+  display: block; 
+  margin-bottom: 5px; 
+}
+#pathInput input { 
+  margin-bottom: 5px; 
+}
 canvas { display: block; }

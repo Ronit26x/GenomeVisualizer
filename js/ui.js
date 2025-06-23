@@ -6,7 +6,7 @@ export function setupUI({
   onGenerate,
   onPin,
   onRedraw,
-  onHighlightPaths,
+  onHighlightPath,
   onClearPaths,
   onRemoveNodes,
   onUndo,
@@ -25,7 +25,22 @@ export function setupUI({
   document.getElementById('genRandom').onclick       = onGenerate;
   document.getElementById('pinNode').onclick         = onPin;
   document.getElementById('redraw').onclick          = onRedraw;
-  document.getElementById('highlightPaths').onclick  = onHighlightPaths;
+  
+  // Path highlighting
+  const pathInput = document.getElementById('pathSequence');
+  const highlightBtn = document.getElementById('highlightPath');
+  
+  highlightBtn.onclick = () => {
+    const sequence = pathInput.value;
+    onHighlightPath(sequence);
+  };
+  
+  pathInput.addEventListener('keypress', e => {
+    if (e.key === 'Enter') {
+      onHighlightPath(pathInput.value);
+    }
+  });
+  
   document.getElementById('clearPaths').onclick      = onClearPaths;
   document.getElementById('removeNodes').onclick     = onRemoveNodes;
   document.getElementById('undo').onclick            = onUndo;
