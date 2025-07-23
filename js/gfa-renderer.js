@@ -594,6 +594,6 @@ function drawGfaEdgeWithSubnodes(ctx, transform, sourceNode, targetNode, linkDat
   ctx.moveTo(startX, startY);
   ctx.lineTo(endX, endY);
   ctx.stroke();
-  
+  // Small Fix
   ctx.restore();
 }
