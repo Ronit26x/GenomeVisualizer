@@ -1,4 +1,4 @@
-// gfa-renderer.js
+// gfa-renderer.js - ENHANCED: Dynamic node rotation based on edge positions
 
 import { layoutGfaNodes } from './gfa-layout.js';
 
@@ -44,7 +44,7 @@ function calculateAutoNodeLength(nodes) {
   }
 }
 
-// GFA Node class for Bandage-style rendering
+// GFA Node class - ENHANCED: Dynamic rotation based on actual edge positions
 class GfaNode {
   constructor(nodeData, scaleFactor = 1.0) {
     this.id = nodeData.id;
@@ -59,7 +59,135 @@ class GfaNode {
     
     this.width = this.calculateWidth();
     this.drawnLength = this.calculateDrawnLength(scaleFactor);
+    
+    // Create subnodes AFTER calculating drawn length
+    this.createSubnodes();
     this.createSegments();
+  }
+
+  // Create incoming and outgoing subnodes
+  createSubnodes() {
+    this.inSubnode = {
+      id: `${this.id}_in`,
+      parentId: this.id,
+      type: 'incoming',
+      x: this.x,
+      y: this.y,
+      radius: 3
+    };
+    
+    this.outSubnode = {
+      id: `${this.id}_out`,
+      parentId: this.id,
+      type: 'outgoing',
+      x: this.x,
+      y: this.y,
+      radius: 3
+    };
+    
+    this.updateSubnodePositions();
+  }
+
+  // Update subnode positions to be exactly at the node ends
+  updateSubnodePositions() {
+    const cos = Math.cos(this.angle);
+    const sin = Math.sin(this.angle);
+    const halfLength = this.drawnLength / 2;
+    
+    // Position subnodes exactly at the ends of the drawn node
+    this.inSubnode.x = this.x - cos * halfLength;
+    this.inSubnode.y = this.y - sin * halfLength;
+    
+    this.outSubnode.x = this.x + cos * halfLength;
+    this.outSubnode.y = this.y + sin * halfLength;
+  }
+
+  // NEW: Calculate optimal rotation based on actual connected node positions
+  calculateOptimalRotation(allNodes, links) {
+    const connections = { incoming: [], outgoing: [] };
+    
+    // Find all connected nodes with their actual positions
+    links.forEach(link => {
+      const sourceId = link.source.id || link.source;
+      const targetId = link.target.id || link.target;
+      
+      if (sourceId === this.id) {
+        // This node is the source, find the target
+        const targetNode = allNodes.find(n => n.id === targetId);
+        if (targetNode && targetNode.x !== undefined && targetNode.y !== undefined) {
+          connections.outgoing.push({
+            node: targetNode,
+            dx: targetNode.x - this.x,
+            dy: targetNode.y - this.y
+          });
+        }
+      } else if (targetId === this.id) {
+        // This node is the target, find the source
+        const sourceNode = allNodes.find(n => n.id === sourceId);
+        if (sourceNode && sourceNode.x !== undefined && sourceNode.y !== undefined) {
+          connections.incoming.push({
+            node: sourceNode,
+            dx: sourceNode.x - this.x,
+            dy: sourceNode.y - this.y
+          });
+        }
+      }
+    });
+    
+    // Calculate optimal angle based on edge pull directions
+    let optimalAngle = this.angle; // Default to current angle
+    
+    if (connections.outgoing.length > 0) {
+      // Priority: Point toward outgoing edges
+      let totalX = 0, totalY = 0;
+      
+      connections.outgoing.forEach(({ dx, dy }) => {
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+          totalX += dx / dist;
+          totalY += dy / dist;
+        }
+      });
+      
+      if (totalX !== 0 || totalY !== 0) {
+        optimalAngle = Math.atan2(totalY, totalX);
+      }
+    } else if (connections.incoming.length > 0) {
+      // Fallback: Point away from incoming edges
+      let totalX = 0, totalY = 0;
+      
+      connections.incoming.forEach(({ dx, dy }) => {
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+          totalX -= dx / dist; // Negative because we want to point away
+          totalY -= dy / dist;
+        }
+      });
+      
+      if (totalX !== 0 || totalY !== 0) {
+        optimalAngle = Math.atan2(totalY, totalX);
+      }
+    }
+    
+    return optimalAngle;
+  }
+
+  // NEW: Apply smooth rotation toward optimal angle
+  applyDynamicRotation(allNodes, links, rotationStrength = 0.1) {
+    const optimalAngle = this.calculateOptimalRotation(allNodes, links);
+    
+    // Calculate the shortest angular distance
+    let angleDiff = optimalAngle - this.angle;
+    
+    // Normalize to [-π, π]
+    while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+    while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+    
+    // Apply gradual rotation
+    this.angle += angleDiff * rotationStrength;
+    
+    // Update positions with new angle
+    this.updatePosition();
   }
 
   calculateWidth() {
@@ -108,6 +236,14 @@ class GfaNode {
       segment.x = centerX + cos * offset;
       segment.y = centerY + sin * offset;
     });
+    
+    // Update subnode positions when node moves or rotates
+    this.updateSubnodePositions();
+  }
+
+  // Get subnode for edge connections
+  getSubnodeForEdge(isOutgoing) {
+    return isOutgoing ? this.outSubnode : this.inSubnode;
   }
 
   getStartPoint() {
@@ -301,6 +437,29 @@ class GfaNode {
       ctx.fillText(label, centerX, centerY);
     }
     
+    // Draw subnodes when zoomed in (red = incoming, green = outgoing)
+    if (transform.k > 1.5) {
+      // Draw incoming subnode in red
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+      ctx.beginPath();
+      ctx.arc(
+        this.inSubnode.x * transform.k + transform.x,
+        this.inSubnode.y * transform.k + transform.y,
+        4 * transform.k, 0, 2 * Math.PI
+      );
+      ctx.fill();
+      
+      // Draw outgoing subnode in green
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+      ctx.beginPath();
+      ctx.arc(
+        this.outSubnode.x * transform.k + transform.x,
+        this.outSubnode.y * transform.k + transform.y,
+        4 * transform.k, 0, 2 * Math.PI
+      );
+      ctx.fill();
+    }
+    
     ctx.restore();
   }
   
@@ -314,7 +473,42 @@ class GfaNode {
   }
 }
 
-// Main GFA rendering function
+// Helper function to determine edge direction based on GFA semantics
+function determineEdgeDirection(sourceNode, targetNode, linkData) {
+  if (linkData.gfaType === 'link') {
+    const srcOri = linkData.srcOrientation || '+';
+    const tgtOri = linkData.tgtOrientation || '+';
+    
+    if (srcOri === '+' && tgtOri === '+') {
+      return {
+        fromSubnode: sourceNode.outSubnode,
+        toSubnode: targetNode.inSubnode
+      };
+    } else if (srcOri === '-' && tgtOri === '+') {
+      return {
+        fromSubnode: sourceNode.inSubnode,
+        toSubnode: targetNode.inSubnode
+      };
+    } else if (srcOri === '+' && tgtOri === '-') {
+      return {
+        fromSubnode: sourceNode.outSubnode,
+        toSubnode: targetNode.outSubnode
+      };
+    } else {
+      return {
+        fromSubnode: sourceNode.inSubnode,
+        toSubnode: targetNode.outSubnode
+      };
+    }
+  }
+  
+  return {
+    fromSubnode: sourceNode.outSubnode,
+    toSubnode: targetNode.inSubnode
+  };
+}
+
+// ENHANCED: Main function with dynamic rotation
 export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, highlightedPath = null, scaleFactor = 1.0) {
   // Create GFA node objects if not already created or if scale changed
   if (!nodes._gfaNodes || nodes._lastScale !== scaleFactor) {
@@ -331,7 +525,9 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
     if (nodes[i]) {
       gfaNode.x = nodes[i].x;
       gfaNode.y = nodes[i].y;
-      gfaNode.updatePosition();
+      
+      // NEW: Apply dynamic rotation based on edge pull
+      gfaNode.applyDynamicRotation(nodes, links, 0.05); // Gentle rotation strength
     }
   });
   
@@ -345,7 +541,7 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   
-  // Draw edges first (behind nodes)
+  // Draw edges using subnodes for proper directionality
   ctx.globalAlpha = 0.6;
   links.forEach((link, index) => {
     const sourceGfaNode = nodes._gfaNodes.find(n => n.id === (link.source.id || link.source));
@@ -353,7 +549,7 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
     
     if (sourceGfaNode && targetGfaNode) {
       const isHighlighted = highlightedPath && highlightedPath.edges && highlightedPath.edges.has(index);
-      drawGfaEdge(ctx, transform, sourceGfaNode, targetGfaNode, link, isHighlighted);
+      drawGfaEdgeWithSubnodes(ctx, transform, sourceGfaNode, targetGfaNode, link, isHighlighted);
     }
   });
   ctx.globalAlpha = 1.0;
@@ -369,10 +565,11 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
   ctx.restore();
 }
 
-// Draw GFA edge with proper end-to-end connection
-function drawGfaEdge(ctx, transform, sourceNode, targetNode, linkData, isHighlighted = false) {
-  const start = sourceNode.getEndPoint();
-  const end = targetNode.getStartPoint();
+// Draw GFA edge using subnodes for proper directionality
+function drawGfaEdgeWithSubnodes(ctx, transform, sourceNode, targetNode, linkData, isHighlighted = false) {
+  const edgeInfo = determineEdgeDirection(sourceNode, targetNode, linkData);
+  const start = edgeInfo.fromSubnode;
+  const end = edgeInfo.toSubnode;
   
   ctx.save();
   
@@ -392,11 +589,7 @@ function drawGfaEdge(ctx, transform, sourceNode, targetNode, linkData, isHighlig
   const endX = end.x * transform.k + transform.x;
   const endY = end.y * transform.k + transform.y;
   
-  // Calculate edge direction based on orientations
-  const sourceAngle = sourceNode.angle;
-  const targetAngle = targetNode.angle;
-  
-  // Simple straight line for now (can be enhanced with curves later)
+  // Draw straight line between subnodes
   ctx.beginPath();
   ctx.moveTo(startX, startY);
   ctx.lineTo(endX, endY);

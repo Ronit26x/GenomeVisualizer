@@ -1,6 +1,6 @@
-// gfa-layout.js
+// gfa-layout.js - FOCUSED FIX: Simple node orientation based on edges
 
-// Align GFA nodes based on their connections (like Bandage does)
+// Align GFA nodes based on their connections (simple and effective)
 export function layoutGfaNodes(gfaNodes, links) {
   // Create maps for quick lookup
   const nodeMap = new Map();
@@ -28,80 +28,21 @@ export function layoutGfaNodes(gfaNodes, links) {
     }
   });
   
-  // Calculate node orientations based on connections
+  // Calculate node orientations - FIXED: Ensure arrow points in flow direction
   gfaNodes.forEach(node => {
     const conn = connections.get(node.id);
+    let targetAngle = 0;
+    let angleSet = false;
     
-    // For nodes with single connections, align them properly
-    if (conn.outgoing.length === 1 && conn.incoming.length === 0) {
-      // Start of a path - point towards the next node
-      const targetNode = nodeMap.get(conn.outgoing[0].nodeId);
-      if (targetNode) {
-        const dx = targetNode.x - node.x;
-        const dy = targetNode.y - node.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 0) {
-          node.angle = Math.atan2(dy, dx);
-        }
-      }
-    } else if (conn.incoming.length === 1 && conn.outgoing.length === 1) {
-      // Middle of a path - align between previous and next
-      const prevNode = nodeMap.get(conn.incoming[0].nodeId);
-      const nextNode = nodeMap.get(conn.outgoing[0].nodeId);
-      
-      if (prevNode && nextNode) {
-        // Calculate angle from previous to next
-        const dx1 = node.x - prevNode.x;
-        const dy1 = node.y - prevNode.y;
-        const dx2 = nextNode.x - node.x;
-        const dy2 = nextNode.y - node.y;
-        
-        // Average the angles
-        const angle1 = Math.atan2(dy1, dx1);
-        const angle2 = Math.atan2(dy2, dx2);
-        
-        // Handle angle wrapping
-        let angleDiff = angle2 - angle1;
-        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-        
-        node.angle = angle1 + angleDiff / 2;
-      }
-    } else if (conn.incoming.length === 1 && conn.outgoing.length === 0) {
-      // End of a path - point away from previous
-      const prevNode = nodeMap.get(conn.incoming[0].nodeId);
-      if (prevNode) {
-        const dx = node.x - prevNode.x;
-        const dy = node.y - prevNode.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 0) {
-          node.angle = Math.atan2(dy, dx);
-        }
-      }
-    } else if (conn.outgoing.length > 1 || conn.incoming.length > 1) {
-      // Junction node - calculate weighted average direction
-      let totalX = 0, totalY = 0;
-      let count = 0;
-      
-      conn.incoming.forEach(({ nodeId }) => {
-        const otherNode = nodeMap.get(nodeId);
-        if (otherNode) {
-          const dx = node.x - otherNode.x;
-          const dy = node.y - otherNode.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 0) {
-            totalX += dx / dist;
-            totalY += dy / dist;
-            count++;
-          }
-        }
-      });
+    // Priority 1: If node has outgoing edges, point toward them
+    if (conn.outgoing.length > 0) {
+      let totalX = 0, totalY = 0, count = 0;
       
       conn.outgoing.forEach(({ nodeId }) => {
-        const otherNode = nodeMap.get(nodeId);
-        if (otherNode) {
-          const dx = otherNode.x - node.x;
-          const dy = otherNode.y - node.y;
+        const targetNode = nodeMap.get(nodeId);
+        if (targetNode) {
+          const dx = targetNode.x - node.x;
+          const dy = targetNode.y - node.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist > 0) {
             totalX += dx / dist;
@@ -111,39 +52,84 @@ export function layoutGfaNodes(gfaNodes, links) {
         }
       });
       
-      if (count > 0 && (totalX !== 0 || totalY !== 0)) {
-        node.angle = Math.atan2(totalY / count, totalX / count);
+      if (count > 0) {
+        targetAngle = Math.atan2(totalY / count, totalX / count);
+        angleSet = true;
+        console.log(`Node ${node.id}: pointing toward ${conn.outgoing.length} outgoing edge(s) at ${(targetAngle * 180 / Math.PI).toFixed(1)}°`);
       }
     }
     
-    // Update node position with calculated angle
+    // Priority 2: If no outgoing edges but has incoming, point away from incoming
+    if (!angleSet && conn.incoming.length > 0) {
+      let totalX = 0, totalY = 0, count = 0;
+      
+      conn.incoming.forEach(({ nodeId }) => {
+        const sourceNode = nodeMap.get(nodeId);
+        if (sourceNode) {
+          const dx = node.x - sourceNode.x;
+          const dy = node.y - sourceNode.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0) {
+            totalX += dx / dist;
+            totalY += dy / dist;
+            count++;
+          }
+        }
+      });
+      
+      if (count > 0) {
+        targetAngle = Math.atan2(totalY / count, totalX / count);
+        angleSet = true;
+        console.log(`Node ${node.id}: pointing away from ${conn.incoming.length} incoming edge(s) at ${(targetAngle * 180 / Math.PI).toFixed(1)}°`);
+      }
+    }
+    
+    // Set the calculated angle
+    if (angleSet) {
+      node.angle = targetAngle;
+    } else {
+      // Default orientation if no connections
+      node.angle = 0;
+      console.log(`Node ${node.id}: no connections, using default orientation`);
+    }
+    
+    // Update node position with new angle
     node.updatePosition();
   });
   
-  // Second pass: refine angles for smoother paths
-  for (let iteration = 0; iteration < 3; iteration++) {
-    gfaNodes.forEach(node => {
-      const conn = connections.get(node.id);
+  // Single pass refinement for linear paths
+  gfaNodes.forEach(node => {
+    const conn = connections.get(node.id);
+    
+    // Special case: linear path (1 in, 1 out) - ensure smooth flow
+    if (conn.incoming.length === 1 && conn.outgoing.length === 1) {
+      const sourceNode = nodeMap.get(conn.incoming[0].nodeId);
+      const targetNode = nodeMap.get(conn.outgoing[0].nodeId);
       
-      // For linear paths, smooth the angles
-      if (conn.incoming.length === 1 && conn.outgoing.length === 1) {
-        const prevNode = nodeMap.get(conn.incoming[0].nodeId);
-        const nextNode = nodeMap.get(conn.outgoing[0].nodeId);
+      if (sourceNode && targetNode) {
+        // Calculate the flow direction from source through this node to target
+        const inDx = node.x - sourceNode.x;
+        const inDy = node.y - sourceNode.y;
+        const outDx = targetNode.x - node.x;
+        const outDy = targetNode.y - node.y;
         
-        if (prevNode && nextNode) {
-          // Calculate the ideal angle for a smooth curve
-          const toPrev = Math.atan2(prevNode.y - node.y, prevNode.x - node.x);
-          const toNext = Math.atan2(nextNode.y - node.y, nextNode.x - node.x);
+        const inDist = Math.sqrt(inDx * inDx + inDy * inDy);
+        const outDist = Math.sqrt(outDx * outDx + outDy * outDy);
+        
+        if (inDist > 0 && outDist > 0) {
+          // Average the normalized directions
+          const avgDx = (inDx / inDist + outDx / outDist) / 2;
+          const avgDy = (inDy / inDist + outDy / outDist) / 2;
           
-          // The node should be perpendicular to the line between prev and next
-          let idealAngle = (toPrev + Math.PI + toNext) / 2;
-          
-          // Smooth transition
-          const smoothingFactor = 0.5;
-          node.angle = node.angle + smoothingFactor * (idealAngle - node.angle);
-          node.updatePosition();
+          if (avgDx !== 0 || avgDy !== 0) {
+            node.angle = Math.atan2(avgDy, avgDx);
+            node.updatePosition();
+            console.log(`Linear node ${node.id}: smoothed to ${(node.angle * 180 / Math.PI).toFixed(1)}°`);
+          }
         }
       }
-    });
-  }
+    }
+  });
+  
+  console.log('Node orientation completed');
 }

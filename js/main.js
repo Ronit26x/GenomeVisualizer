@@ -27,7 +27,7 @@ function resizeCanvas() {
       d3.forceCenter(canvas.width/2, canvas.height/2)
     );
   }
-  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath); // CHANGED: pass highlightedPath
+  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath); // UPDATED: pass highlightedPath
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -37,7 +37,7 @@ d3.select(canvas).call(
     .scaleExtent([0.01, 10])
     .on('zoom', ({transform: t}) => {
       transform = t;
-      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath); // CHANGED: pass highlightedPath
+      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath); // UPDATED: pass highlightedPath
     })
 );
 
@@ -53,7 +53,7 @@ function startSimulation() {
   simulation = createSimulation(
     nodes, links,
     canvas.width, canvas.height,
-    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath) // CHANGED: pass highlightedPath
+    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath) // UPDATED: pass highlightedPath
   );
 }
 
@@ -250,7 +250,7 @@ setupUI({
   onGenerate:    generateRandom,
   onPin:         pinSelected,
   onRedraw:      startSimulation,
-  onHighlightPath: highlightPaths,  // CHANGED: new handler
+  onHighlightPath: highlightPaths,  // UPDATED: new handler
   onClearPaths:     clearPaths,
   onRemoveNodes:    removeSelected,
   onUndo:            undo,

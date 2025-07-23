@@ -1,11 +1,11 @@
-// simulation.js
+// simulation.js - REVERTED: Back to your original working simulation
 
 export function createSimulation(nodes, links, width, height, onTick) {
   // Check if this is a GFA graph
   const isGfaGraph = nodes.some(n => n.gfaType === 'segment');
   
   if (isGfaGraph) {
-    // GFA-specific simulation with adjusted forces
+    // GFA-specific simulation with adjusted forces - BACK TO ORIGINAL SETTINGS
     const getLinkDistance = (link) => {
       const sourceLength = link.source._drawnLength || 50;
       const targetLength = link.target._drawnLength || 50;
@@ -25,6 +25,7 @@ export function createSimulation(nodes, links, width, height, onTick) {
       });
     }
     
+    // ORIGINAL: Simple, clean simulation without conflicting forces
     return d3.forceSimulation(nodes)
       .force('link', d3.forceLink(links)
         .id(d => d.id)
