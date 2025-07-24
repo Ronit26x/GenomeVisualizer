@@ -1,10 +1,11 @@
-// ui.js
+// ui.js - ENHANCED: Added flip button
 
 export function setupUI({
   canvas,
   onFileLoad,
   onGenerate,
   onPin,
+  onFlip,        // NEW: flip handler
   onRedraw,
   onHighlightPath,
   onClearPaths,
@@ -24,6 +25,12 @@ export function setupUI({
 
   document.getElementById('genRandom').onclick       = onGenerate;
   document.getElementById('pinNode').onclick         = onPin;
+  
+  // NEW: Flip button
+  if (document.getElementById('flipNode') && onFlip) {
+    document.getElementById('flipNode').onclick = onFlip;
+  }
+  
   document.getElementById('redraw').onclick          = onRedraw;
   
   // Path highlighting
@@ -65,5 +72,11 @@ export function showGfaControls(show) {
   const gfaControls = document.getElementById('gfaControls');
   if (gfaControls) {
     gfaControls.style.display = show ? 'block' : 'none';
+  }
+  
+  // Show/hide flip button based on format
+  const flipButton = document.getElementById('flipNode');
+  if (flipButton) {
+    flipButton.style.display = show ? 'block' : 'none';
   }
 }

@@ -1,18 +1,19 @@
-// main.js
+// main.js - ENHANCED: Added node flipping functionality
 
 import { parseDot, parseGfa }       from './parser.js';
 import { createSimulation }         from './simulation.js';
 import { clearCanvas, drawGraph }   from './renderer.js';
+import { flipSelectedNode, getSubnodeAt } from './gfa-renderer.js'; // NEW: import flip functions
 import { setupUI }                  from './ui.js';
 
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 let transform = d3.zoomIdentity;
 let simulation, nodes = [], links = [], history = [];
-let currentFormat = 'dot'; // NEW: track current format
+let currentFormat = 'dot'; // Track current format
 const selected    = { nodes: new Set(), edges: new Set() };
 const pinnedNodes = new Set();
-const highlightedPath = { nodes: new Set(), edges: new Set() }; // NEW: track highlighted path
+const highlightedPath = { nodes: new Set(), edges: new Set() }; // Track highlighted path
 
 function logEvent(msg) {
   document.getElementById('debug').innerText += msg + '\n';
@@ -27,7 +28,7 @@ function resizeCanvas() {
       d3.forceCenter(canvas.width/2, canvas.height/2)
     );
   }
-  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath); // UPDATED: pass highlightedPath
+  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -37,7 +38,7 @@ d3.select(canvas).call(
     .scaleExtent([0.01, 10])
     .on('zoom', ({transform: t}) => {
       transform = t;
-      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath); // UPDATED: pass highlightedPath
+      drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
     })
 );
 
@@ -53,7 +54,7 @@ function startSimulation() {
   simulation = createSimulation(
     nodes, links,
     canvas.width, canvas.height,
-    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath) // UPDATED: pass highlightedPath
+    () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath)
   );
 }
 
@@ -63,7 +64,13 @@ function parseGraph(text, name) {
     logEvent('→ Detected GFA content despite .dot; switching');
     fmt = 'gfa';
   }
-  currentFormat = fmt; // NEW: store format
+  currentFormat = fmt;
+  
+  // Update UI based on format
+  if (window.updateUIForFormat) {
+    window.updateUIForFormat(fmt);
+  }
+  
   logEvent(`Parsing ${fmt} graph`);
   const parsed = fmt==='dot'
     ? parseDot(text, logEvent)
@@ -76,7 +83,13 @@ function parseGraph(text, name) {
 }
 
 function generateRandom() {
-  currentFormat = 'dot'; // NEW: set format for random
+  currentFormat = 'dot';
+  
+  // Update UI based on format
+  if (window.updateUIForFormat) {
+    window.updateUIForFormat('dot');
+  }
+  
   nodes = d3.range(50).map(i=>({id:i}));
   links = d3.range(49).map(i=>({source:i,target:i+1}));
   startSimulation();
@@ -90,6 +103,27 @@ function pinSelected() {
     }
   });
   simulation.alpha(0.1).restart();
+}
+
+// NEW: Flip selected nodes
+function flipSelected() {
+  if (currentFormat !== 'gfa') {
+    logEvent('Node flipping is only available for GFA graphs');
+    return;
+  }
+  
+  if (selected.nodes.size === 0) {
+    logEvent('No nodes selected for flipping');
+    return;
+  }
+  
+  const flipped = flipSelectedNode(nodes, selected);
+  if (flipped) {
+    logEvent(`Flipped ${selected.nodes.size} node(s)`);
+    // Restart simulation with low alpha to settle the layout
+    simulation.alpha(0.1).restart();
+    drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
+  }
 }
 
 function highlightPaths(sequence) {
@@ -189,11 +223,25 @@ function selectNode(evt) {
   if(found){
     selected.nodes.clear();
     selected.nodes.add(found.id);
-    document.getElementById('infoContent').innerHTML =
-      `<strong>Node ${found.id}</strong><pre>${JSON.stringify(found,null,2)}</pre>`;
+    
+    // Show node information with flip status for GFA nodes
+    let infoHTML = `<strong>Node ${found.id}</strong>`;
+    if (currentFormat === 'gfa' && nodes._gfaNodes) {
+      const gfaNode = nodes._gfaNodes.find(n => n.id === found.id);
+      if (gfaNode) {
+        infoHTML += `<br><em>Flipped: ${gfaNode.isFlipped ? 'Yes' : 'No'}</em>`;
+        infoHTML += `<br><em>Angle: ${(gfaNode.angle * 180 / Math.PI).toFixed(1)}°</em>`;
+      }
+    }
+    infoHTML += `<pre>${JSON.stringify(found,null,2)}</pre>`;
+    
+    document.getElementById('infoContent').innerHTML = infoHTML;
     drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
   }
 }
+
+// Removed double-click flip functionality - use button only
+// Double-click now just acts like a regular click for selection
 
 // pointer drag for nodes
 let dragNode = null;
@@ -244,13 +292,17 @@ function endDrag(){
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointerleave', endDrag);
 
+// Remove double-click listener for node flipping - use button only
+// canvas.addEventListener('dblclick', handleDoubleClick);
+
 setupUI({
   canvas,
   onFileLoad:    parseGraph,
   onGenerate:    generateRandom,
   onPin:         pinSelected,
+  onFlip:        flipSelected,  // NEW: Add flip handler
   onRedraw:      startSimulation,
-  onHighlightPath: highlightPaths,  // UPDATED: new handler
+  onHighlightPath: highlightPaths,
   onClearPaths:     clearPaths,
   onRemoveNodes:    removeSelected,
   onUndo:            undo,

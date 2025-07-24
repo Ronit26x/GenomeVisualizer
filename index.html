@@ -18,6 +18,7 @@
       <button id="genRandom">Generate Random Graph</button>
       <button id="resetView">Return to Default View</button>
       <button id="pinNode">Pin Selected Node</button>
+      <button id="flipNode" style="display: none;">Flip Selected Node ↻</button>
       <button id="redraw">Redraw Layout</button>
       <div id="pathInput">
         <label for="pathSequence">Path Sequence:</label>
@@ -27,6 +28,14 @@
       <button id="clearPaths">Clear Path Highlights</button>
       <button id="removeNodes">Remove Selected Nodes</button>
       <button id="undo">Undo</button>
+      
+      <div id="flipInstructions" style="display: none; margin-top: 15px; padding: 10px; background: #f0f8ff; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">
+        <strong>GFA Node Flipping:</strong><br>
+        • <strong>Click</strong> to select a node<br>
+        • Use <strong>Flip Button</strong> for selected node<br>
+        • Red dot = incoming end<br>
+        • Green dot = outgoing end
+      </div>
     </div>
     <div id="viz">
       <canvas id="canvas"></canvas>
@@ -37,5 +46,24 @@
     </div>
     <div id="debug"></div>
   </div>
+
+  <script>
+    // Show/hide GFA-specific controls based on loaded format
+    function updateUIForFormat(format) {
+      const flipButton = document.getElementById('flipNode');
+      const flipInstructions = document.getElementById('flipInstructions');
+      
+      if (format === 'gfa') {
+        flipButton.style.display = 'block';
+        flipInstructions.style.display = 'block';
+      } else {
+        flipButton.style.display = 'none';
+        flipInstructions.style.display = 'none';
+      }
+    }
+    
+    // Make function available globally so main.js can call it
+    window.updateUIForFormat = updateUIForFormat;
+  </script>
 </body>
 </html>

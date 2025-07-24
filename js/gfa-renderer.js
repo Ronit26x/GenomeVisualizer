@@ -1,4 +1,4 @@
-// gfa-renderer.js - ENHANCED: Rounded nodes and curved edges
+// gfa-renderer.js - ENHANCED: Rounded nodes, curved edges, and node flipping
 
 import { layoutGfaNodes } from './gfa-layout.js';
 
@@ -160,7 +160,7 @@ function createNodePath(segments, width) {
   return path;
 }
 
-// GFA Node class - ENHANCED: Rounded rendering
+// GFA Node class - ENHANCED: Rounded rendering and flipping functionality
 class GfaNode {
   constructor(nodeData, scaleFactor = 1.0) {
     this.id = nodeData.id;
@@ -170,6 +170,7 @@ class GfaNode {
     this.x = nodeData.x || 0;
     this.y = nodeData.y || 0;
     this.angle = 0;
+    this.isFlipped = false; // NEW: Track flip state
     this.segments = [];
     this.scaleFactor = scaleFactor;
     
@@ -179,6 +180,47 @@ class GfaNode {
     // Create subnodes AFTER calculating drawn length
     this.createSubnodes();
     this.createSegments();
+  }
+
+  // NEW: Flip the node 180 degrees
+  flip() {
+    this.isFlipped = !this.isFlipped;
+    this.angle += Math.PI; // Rotate 180 degrees
+    
+    // Normalize angle to [-π, π]
+    while (this.angle > Math.PI) this.angle -= 2 * Math.PI;
+    while (this.angle < -Math.PI) this.angle += 2 * Math.PI;
+    
+    // Swap the subnodes since they represent different ends now
+    const tempSubnode = { ...this.inSubnode };
+    this.inSubnode = { ...this.outSubnode };
+    this.outSubnode = tempSubnode;
+    
+    // Update IDs to reflect the swap
+    this.inSubnode.id = `${this.id}_in`;
+    this.inSubnode.type = 'incoming';
+    this.outSubnode.id = `${this.id}_out`;
+    this.outSubnode.type = 'outgoing';
+    
+    this.updatePosition();
+    
+    console.log(`Node ${this.id} flipped. New angle: ${(this.angle * 180 / Math.PI).toFixed(1)}°`);
+  }
+
+  // NEW: Check if a point is near a subnode (for flip interaction)
+  getSubnodeAt(x, y, threshold = 10) {
+    const inDist = Math.sqrt(
+      (x - this.inSubnode.x) * (x - this.inSubnode.x) + 
+      (y - this.inSubnode.y) * (y - this.inSubnode.y)
+    );
+    const outDist = Math.sqrt(
+      (x - this.outSubnode.x) * (x - this.outSubnode.x) + 
+      (y - this.outSubnode.y) * (y - this.outSubnode.y)
+    );
+    
+    if (inDist <= threshold) return 'incoming';
+    if (outDist <= threshold) return 'outgoing';
+    return null;
   }
 
   // Create incoming and outgoing subnodes
@@ -288,8 +330,11 @@ class GfaNode {
     return optimalAngle;
   }
 
-  // Apply smooth rotation toward optimal angle
+  // Apply smooth rotation toward optimal angle (disabled when manually flipped)
   applyDynamicRotation(allNodes, links, rotationStrength = 0.1) {
+    // Skip dynamic rotation if node was manually flipped recently
+    if (this._skipDynamicRotation) return;
+    
     const optimalAngle = this.calculateOptimalRotation(allNodes, links);
     
     // Calculate the shortest angular distance
@@ -450,8 +495,8 @@ class GfaNode {
       
       // Measure text
       const label = this.drawnLength > 80 ? 
-        `${this.id} (${this.formatLength(this.length)})` : 
-        this.id;
+        `${this.id} (${this.formatLength(this.length)})${this.isFlipped ? ' ↻' : ''}` : 
+        `${this.id}${this.isFlipped ? ' ↻' : ''}`;
       const metrics = ctx.measureText(label);
       const textWidth = metrics.width;
       const textHeight = fontSize;
@@ -491,6 +536,8 @@ class GfaNode {
         4 * transform.k, 0, 2 * Math.PI
       );
       ctx.fill();
+      
+      // Removed flip indicator - no visual clutter when selected
     }
     
     ctx.restore();
@@ -575,7 +622,50 @@ function createCurvedEdgePath(startX, startY, endX, endY, curvature = 0.2) {
   return path;
 }
 
-// ENHANCED: Main function with rounded nodes and curved edges
+// NEW: Function to flip a selected node
+export function flipSelectedNode(nodes, selected) {
+  if (!nodes._gfaNodes || !selected || !selected.nodes) return false;
+  
+  let flipped = false;
+  for (const nodeId of selected.nodes) {
+    const gfaNode = nodes._gfaNodes.find(n => n.id === nodeId);
+    if (gfaNode) {
+      gfaNode.flip();
+      // Temporarily disable dynamic rotation to preserve manual flip
+      gfaNode._skipDynamicRotation = true;
+      setTimeout(() => {
+        if (gfaNode) gfaNode._skipDynamicRotation = false;
+      }, 3000); // Re-enable after 3 seconds
+      flipped = true;
+    }
+  }
+  
+  return flipped;
+}
+
+// NEW: Function to check if click is on a subnode (for flip interaction)
+export function getSubnodeAt(nodes, x, y, transform, threshold = 15) {
+  if (!nodes._gfaNodes) return null;
+  
+  // Convert screen coordinates to simulation coordinates
+  const simX = (x - transform.x) / transform.k;
+  const simY = (y - transform.y) / transform.k;
+  
+  for (const gfaNode of nodes._gfaNodes) {
+    const subnodeType = gfaNode.getSubnodeAt(simX, simY, threshold / transform.k);
+    if (subnodeType) {
+      return {
+        nodeId: gfaNode.id,
+        subnodeType: subnodeType,
+        gfaNode: gfaNode
+      };
+    }
+  }
+  
+  return null;
+}
+
+// ENHANCED: Main function with rounded nodes, curved edges, and flipping
 export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, highlightedPath = null, scaleFactor = 1.0) {
   // Create GFA node objects if not already created or if scale changed
   if (!nodes._gfaNodes || nodes._lastScale !== scaleFactor) {
