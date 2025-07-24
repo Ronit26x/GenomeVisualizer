@@ -1,9 +1,9 @@
-// main.js - ENHANCED: Added node flipping functionality
+// main.js - ENHANCED: Added vertex resolution functionality
 
 import { parseDot, parseGfa }       from './parser.js';
 import { createSimulation }         from './simulation.js';
 import { clearCanvas, drawGraph }   from './renderer.js';
-import { flipSelectedNode, getSubnodeAt } from './gfa-renderer.js'; // NEW: import flip functions
+import { flipSelectedNode, getSubnodeAt } from './gfa-renderer.js';
 import { setupUI }                  from './ui.js';
 
 const canvas = document.getElementById('canvas');
@@ -105,7 +105,7 @@ function pinSelected() {
   simulation.alpha(0.1).restart();
 }
 
-// NEW: Flip selected nodes
+// Flip selected nodes
 function flipSelected() {
   if (currentFormat !== 'gfa') {
     logEvent('Node flipping is only available for GFA graphs');
@@ -123,6 +123,267 @@ function flipSelected() {
     // Restart simulation with low alpha to settle the layout
     simulation.alpha(0.1).restart();
     drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
+  }
+}
+
+// NEW: Vertex Resolution Functions
+function getVertexConnections(vertexId) {
+  const incoming = [];
+  const outgoing = [];
+
+  links.forEach((link, index) => {
+    const sourceId = link.source.id || link.source;
+    const targetId = link.target.id || link.target;
+
+    if (targetId === vertexId) {
+      incoming.push({
+        linkIndex: index,
+        link: link,
+        sourceId: sourceId,
+        orientation: link.tgtOrientation || '+'
+      });
+    }
+    if (sourceId === vertexId) {
+      outgoing.push({
+        linkIndex: index,
+        link: link,
+        targetId: targetId,
+        orientation: link.srcOrientation || '+'
+      });
+    }
+  });
+
+  return { incoming, outgoing };
+}
+
+function generatePathCombinations(incoming, outgoing) {
+  const combinations = [];
+  
+  // If no incoming edges, create combinations with just outgoing
+  if (incoming.length === 0) {
+    outgoing.forEach(out => {
+      combinations.push({
+        incoming: null,
+        outgoing: out,
+        id: `start_${out.targetId}`,
+        description: `Start → ${out.targetId}`
+      });
+    });
+  }
+  // If no outgoing edges, create combinations with just incoming
+  else if (outgoing.length === 0) {
+    incoming.forEach(inc => {
+      combinations.push({
+        incoming: inc,
+        outgoing: null,
+        id: `${inc.sourceId}_end`,
+        description: `${inc.sourceId} → End`
+      });
+    });
+  }
+  // Normal case: all combinations of incoming and outgoing
+  else {
+    incoming.forEach(inc => {
+      outgoing.forEach(out => {
+        combinations.push({
+          incoming: inc,
+          outgoing: out,
+          id: `${inc.sourceId}_${out.targetId}`,
+          description: `${inc.sourceId} → ${out.targetId}`
+        });
+      });
+    });
+  }
+
+  return combinations;
+}
+
+function showResolveDialog(vertexId) {
+  const vertex = nodes.find(n => n.id === vertexId);
+  if (!vertex) return;
+
+  const connections = getVertexConnections(vertexId);
+  const combinations = generatePathCombinations(connections.incoming, connections.outgoing);
+
+  // Populate vertex info
+  document.getElementById('vertexInfo').innerHTML = `
+    <strong>Vertex:</strong> ${vertexId}<br>
+    <strong>Incoming edges:</strong> ${connections.incoming.length}<br>
+    <strong>Outgoing edges:</strong> ${connections.outgoing.length}<br>
+    <strong>Possible paths:</strong> ${combinations.length}
+  `;
+
+  // Populate path combinations
+  const pathContainer = document.getElementById('pathCombinations');
+  pathContainer.innerHTML = '';
+
+  combinations.forEach((combo, index) => {
+    const div = document.createElement('div');
+    div.className = 'path-combination';
+    
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = `path_${index}`;
+    checkbox.checked = true; // Default to all selected
+    checkbox.dataset.comboIndex = index;
+
+    const label = document.createElement('label');
+    label.setAttribute('for', `path_${index}`);
+    
+    let labelHTML = `<span class="incoming-edge">${combo.incoming ? combo.incoming.sourceId : 'START'}</span>`;
+    labelHTML += ` → <strong>${vertexId}</strong> → `;
+    labelHTML += `<span class="outgoing-edge">${combo.outgoing ? combo.outgoing.targetId : 'END'}</span>`;
+    
+    if (combo.incoming || combo.outgoing) {
+      labelHTML += `<span class="edge-info">(${combo.description})</span>`;
+    }
+
+    label.innerHTML = labelHTML;
+    
+    div.appendChild(checkbox);
+    div.appendChild(label);
+    pathContainer.appendChild(div);
+  });
+
+  // Update stats
+  updateResolutionStats(combinations.length, combinations.length);
+
+  // Add event listeners for checkboxes
+  pathContainer.addEventListener('change', () => {
+    const checked = pathContainer.querySelectorAll('input[type="checkbox"]:checked').length;
+    updateResolutionStats(combinations.length, checked);
+  });
+
+  // Store data for resolution
+  window.currentResolution = {
+    vertex: vertex,
+    combinations: combinations,
+    connections: connections
+  };
+
+  // Show dialog
+  document.getElementById('dialogOverlay').style.display = 'block';
+  document.getElementById('resolveDialog').style.display = 'block';
+}
+
+function updateResolutionStats(total, selected) {
+  document.getElementById('resolutionStats').textContent = 
+    `${selected} of ${total} paths selected. ${total - selected} paths will be removed.`;
+}
+
+function hideResolveDialog() {
+  document.getElementById('dialogOverlay').style.display = 'none';
+  document.getElementById('resolveDialog').style.display = 'none';
+  window.currentResolution = null;
+}
+
+function performVertexResolution() {
+  if (!window.currentResolution) return;
+
+  const { vertex, combinations, connections } = window.currentResolution;
+  const selectedCombos = [];
+
+  // Get selected combinations
+  document.querySelectorAll('#pathCombinations input[type="checkbox"]:checked').forEach(checkbox => {
+    const index = parseInt(checkbox.dataset.comboIndex);
+    selectedCombos.push(combinations[index]);
+  });
+
+  if (selectedCombos.length === 0) {
+    alert('Please select at least one path to keep.');
+    return;
+  }
+
+  logEvent(`Resolving vertex ${vertex.id} into ${selectedCombos.length} copies`);
+
+  // Create new nodes for each selected combination
+  const newNodes = [];
+  const newLinks = [];
+
+  selectedCombos.forEach((combo, index) => {
+    // Create new vertex
+    const newNodeId = selectedCombos.length === 1 ? vertex.id : `${vertex.id}_${index + 1}`;
+    const newNode = {
+      ...vertex,
+      id: newNodeId,
+      originalId: vertex.id,
+      pathDescription: combo.description
+    };
+    
+    // Position new nodes near original (with slight offset for multiple copies)
+    if (selectedCombos.length > 1) {
+      const angleOffset = (index * 2 * Math.PI) / selectedCombos.length;
+      const radius = 30;
+      newNode.x = vertex.x + radius * Math.cos(angleOffset);
+      newNode.y = vertex.y + radius * Math.sin(angleOffset);
+    }
+
+    newNodes.push(newNode);
+
+    // Create links for this path
+    if (combo.incoming) {
+      newLinks.push({
+        ...combo.incoming.link,
+        target: newNodeId,
+        source: combo.incoming.sourceId
+      });
+    }
+
+    if (combo.outgoing) {
+      newLinks.push({
+        ...combo.outgoing.link,
+        source: newNodeId,
+        target: combo.outgoing.targetId
+      });
+    }
+  });
+
+  // Remove original vertex and its edges
+  nodes = nodes.filter(n => n.id !== vertex.id);
+  links = links.filter(l => {
+    const sourceId = l.source.id || l.source;
+    const targetId = l.target.id || l.target;
+    return sourceId !== vertex.id && targetId !== vertex.id;
+  });
+
+  // Add new nodes and links
+  nodes.push(...newNodes);
+  links.push(...newLinks);
+
+  // Clear selection
+  selected.nodes.clear();
+  pinnedNodes.delete(vertex.id);
+
+  // Update UI
+  updateResolveButton();
+  hideResolveDialog();
+
+  // Restart simulation
+  startSimulation();
+
+  logEvent(`Vertex resolution complete: created ${newNodes.length} new vertices`);
+}
+
+function updateResolveButton() {
+  const resolveBtn = document.getElementById('resolveVertex');
+  const hasSelection = selected.nodes.size === 1;
+  
+  resolveBtn.disabled = !hasSelection;
+  
+  if (hasSelection) {
+    const vertexId = Array.from(selected.nodes)[0];
+    const connections = getVertexConnections(vertexId);
+    const totalConnections = connections.incoming.length + connections.outgoing.length;
+    
+    if (totalConnections > 1) {
+      resolveBtn.textContent = `Resolve Vertex (${totalConnections} edges)`;
+      resolveBtn.disabled = false;
+    } else {
+      resolveBtn.textContent = 'Resolve Vertex';
+      resolveBtn.disabled = true; // Can't resolve vertex with 0-1 connections
+    }
+  } else {
+    resolveBtn.textContent = 'Resolve Vertex';
   }
 }
 
@@ -233,15 +494,20 @@ function selectNode(evt) {
         infoHTML += `<br><em>Angle: ${(gfaNode.angle * 180 / Math.PI).toFixed(1)}°</em>`;
       }
     }
+
+    // Add resolution info
+    const connections = getVertexConnections(found.id);
+    infoHTML += `<br><em>Incoming: ${connections.incoming.length}, Outgoing: ${connections.outgoing.length}</em>`;
     infoHTML += `<pre>${JSON.stringify(found,null,2)}</pre>`;
     
     document.getElementById('infoContent').innerHTML = infoHTML;
+    
+    // Update resolve button state
+    updateResolveButton();
+    
     drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
   }
 }
-
-// Removed double-click flip functionality - use button only
-// Double-click now just acts like a regular click for selection
 
 // pointer drag for nodes
 let dragNode = null;
@@ -292,15 +558,23 @@ function endDrag(){
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointerleave', endDrag);
 
-// Remove double-click listener for node flipping - use button only
-// canvas.addEventListener('dblclick', handleDoubleClick);
+// Dialog event listeners
+document.getElementById('cancelResolve').addEventListener('click', hideResolveDialog);
+document.getElementById('confirmResolve').addEventListener('click', performVertexResolution);
+document.getElementById('dialogOverlay').addEventListener('click', hideResolveDialog);
 
 setupUI({
   canvas,
   onFileLoad:    parseGraph,
   onGenerate:    generateRandom,
   onPin:         pinSelected,
-  onFlip:        flipSelected,  // NEW: Add flip handler
+  onFlip:        flipSelected,
+  onResolve:     () => {
+    if (selected.nodes.size === 1) {
+      const vertexId = Array.from(selected.nodes)[0];
+      showResolveDialog(vertexId);
+    }
+  },
   onRedraw:      startSimulation,
   onHighlightPath: highlightPaths,
   onClearPaths:     clearPaths,

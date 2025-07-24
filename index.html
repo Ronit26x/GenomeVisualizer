@@ -19,6 +19,7 @@
       <button id="resetView">Return to Default View</button>
       <button id="pinNode">Pin Selected Node</button>
       <button id="flipNode" style="display: none;">Flip Selected Node ↻</button>
+      <button id="resolveVertex" disabled>Resolve Vertex</button>
       <button id="redraw">Redraw Layout</button>
       <div id="pathInput">
         <label for="pathSequence">Path Sequence:</label>
@@ -36,6 +37,14 @@
         • Red dot = incoming end<br>
         • Green dot = outgoing end
       </div>
+
+      <div id="resolveInstructions" style="display: none; margin-top: 15px; padding: 10px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; font-size: 12px;">
+        <strong>Vertex Resolution:</strong><br>
+        • <strong>Click</strong> to select a vertex<br>
+        • Use <strong>Resolve Vertex</strong> button<br>
+        • Choose which paths to keep<br>
+        • Creates new vertices for each path
+      </div>
     </div>
     <div id="viz">
       <canvas id="canvas"></canvas>
@@ -45,20 +54,36 @@
       <div id="infoContent">Select a node or edge to see details here.</div>
     </div>
     <div id="debug"></div>
+
+    <!-- Vertex Resolution Dialog -->
+    <div id="dialogOverlay" style="display: none;"></div>
+    <div id="resolveDialog" style="display: none;">
+      <h3>Resolve Vertex</h3>
+      <div id="vertexInfo" class="vertex-info"></div>
+      <div id="pathCombinations"></div>
+      <div class="stats" id="resolutionStats"></div>
+      <div class="dialog-buttons">
+        <button class="cancel-btn" id="cancelResolve">Cancel</button>
+        <button class="confirm-btn" id="confirmResolve">Resolve Vertex</button>
+      </div>
+    </div>
   </div>
 
   <script>
-    // Show/hide GFA-specific controls based on loaded format
+    // Show/hide format-specific controls based on loaded format
     function updateUIForFormat(format) {
       const flipButton = document.getElementById('flipNode');
       const flipInstructions = document.getElementById('flipInstructions');
+      const resolveInstructions = document.getElementById('resolveInstructions');
       
       if (format === 'gfa') {
         flipButton.style.display = 'block';
         flipInstructions.style.display = 'block';
+        resolveInstructions.style.display = 'block';
       } else {
         flipButton.style.display = 'none';
         flipInstructions.style.display = 'none';
+        resolveInstructions.style.display = 'block'; // Resolution works for both formats
       }
     }
     

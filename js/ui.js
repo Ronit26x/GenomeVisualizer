@@ -1,11 +1,12 @@
-// ui.js - ENHANCED: Added flip button
+// ui.js - ENHANCED: Added resolve button handler
 
 export function setupUI({
   canvas,
   onFileLoad,
   onGenerate,
   onPin,
-  onFlip,        // NEW: flip handler
+  onFlip,        // Existing flip handler
+  onResolve,     // NEW: resolve handler
   onRedraw,
   onHighlightPath,
   onClearPaths,
@@ -26,9 +27,14 @@ export function setupUI({
   document.getElementById('genRandom').onclick       = onGenerate;
   document.getElementById('pinNode').onclick         = onPin;
   
-  // NEW: Flip button
+  // Flip button
   if (document.getElementById('flipNode') && onFlip) {
     document.getElementById('flipNode').onclick = onFlip;
+  }
+  
+  // NEW: Resolve button
+  if (document.getElementById('resolveVertex') && onResolve) {
+    document.getElementById('resolveVertex').onclick = onResolve;
   }
   
   document.getElementById('redraw').onclick          = onRedraw;
