@@ -1,4 +1,4 @@
-// gfa-renderer.js - ENHANCED: Dynamic node rotation based on edge positions
+// gfa-renderer.js - ENHANCED: Rounded nodes and curved edges
 
 import { layoutGfaNodes } from './gfa-layout.js';
 
@@ -44,7 +44,123 @@ function calculateAutoNodeLength(nodes) {
   }
 }
 
-// GFA Node class - ENHANCED: Dynamic rotation based on actual edge positions
+// NEW: Create smooth bezier curve for node shape
+function createNodePath(segments, width) {
+  if (segments.length < 2) return new Path2D();
+  
+  const path = new Path2D();
+  const halfWidth = width / 2;
+  
+  // Calculate control points for smooth curves
+  const topPoints = [];
+  const bottomPoints = [];
+  
+  segments.forEach((segment, i) => {
+    let dx = 0, dy = 0;
+    
+    if (i === 0) {
+      // First segment: use direction to next
+      dx = segments[1].x - segments[0].x;
+      dy = segments[1].y - segments[0].y;
+    } else if (i === segments.length - 1) {
+      // Last segment: use direction from previous
+      dx = segments[i].x - segments[i-1].x;
+      dy = segments[i].y - segments[i-1].y;
+    } else {
+      // Middle segments: average of directions
+      const dx1 = segments[i].x - segments[i-1].x;
+      const dy1 = segments[i].y - segments[i-1].y;
+      const dx2 = segments[i+1].x - segments[i].x;
+      const dy2 = segments[i+1].y - segments[i].y;
+      dx = (dx1 + dx2) / 2;
+      dy = (dy1 + dy2) / 2;
+    }
+    
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const normalX = len > 0 ? -dy / len : 0;
+    const normalY = len > 0 ? dx / len : 1;
+    
+    topPoints.push({
+      x: segment.x + normalX * halfWidth,
+      y: segment.y + normalY * halfWidth
+    });
+    
+    bottomPoints.push({
+      x: segment.x - normalX * halfWidth,
+      y: segment.y - normalY * halfWidth
+    });
+  });
+  
+  // Start with rounded cap at the beginning
+  const firstTop = topPoints[0];
+  const firstBottom = bottomPoints[0];
+  const firstCenter = segments[0];
+  
+  // Create rounded start cap
+  const startAngle = Math.atan2(firstTop.y - firstBottom.y, firstTop.x - firstBottom.x);
+  path.arc(firstCenter.x, firstCenter.y, halfWidth, startAngle, startAngle + Math.PI);
+  
+  // Draw top edge with smooth curves
+  for (let i = 1; i < topPoints.length; i++) {
+    if (i === 1) {
+      path.lineTo(topPoints[i].x, topPoints[i].y);
+    } else {
+      // Use quadratic curve for smoothness
+      const prevPoint = topPoints[i-1];
+      const currPoint = topPoints[i];
+      const controlX = (prevPoint.x + currPoint.x) / 2;
+      const controlY = (prevPoint.y + currPoint.y) / 2;
+      path.quadraticCurveTo(controlX, controlY, currPoint.x, currPoint.y);
+    }
+  }
+  
+  // Rounded end cap with arrow
+  const lastTop = topPoints[topPoints.length - 1];
+  const lastBottom = bottomPoints[bottomPoints.length - 1];
+  const lastCenter = segments[segments.length - 1];
+  
+  // Arrow head
+  const secondLastCenter = segments[segments.length - 2];
+  const arrowDx = lastCenter.x - secondLastCenter.x;
+  const arrowDy = lastCenter.y - secondLastCenter.y;
+  const arrowLen = Math.sqrt(arrowDx * arrowDx + arrowDy * arrowDy);
+  
+  if (arrowLen > 0) {
+    const arrowSize = Math.min(width * 1.5, arrowLen * 0.5);
+    const arrowUnitX = arrowDx / arrowLen;
+    const arrowUnitY = arrowDy / arrowLen;
+    
+    // Arrow tip
+    const arrowTipX = lastCenter.x + arrowUnitX * arrowSize * 0.5;
+    const arrowTipY = lastCenter.y + arrowUnitY * arrowSize * 0.5;
+    
+    path.lineTo(arrowTipX, arrowTipY);
+    path.lineTo(lastBottom.x, lastBottom.y);
+  } else {
+    // Fallback: simple rounded end
+    const endAngle = Math.atan2(lastBottom.y - lastTop.y, lastBottom.x - lastTop.x);
+    path.arc(lastCenter.x, lastCenter.y, halfWidth, endAngle, endAngle + Math.PI);
+  }
+  
+  // Draw bottom edge with smooth curves (in reverse)
+  for (let i = bottomPoints.length - 2; i >= 0; i--) {
+    if (i === bottomPoints.length - 2) {
+      path.lineTo(bottomPoints[i].x, bottomPoints[i].y);
+    } else {
+      // Use quadratic curve for smoothness
+      const nextPoint = bottomPoints[i+1];
+      const currPoint = bottomPoints[i];
+      const controlX = (nextPoint.x + currPoint.x) / 2;
+      const controlY = (nextPoint.y + currPoint.y) / 2;
+      path.quadraticCurveTo(controlX, controlY, currPoint.x, currPoint.y);
+    }
+  }
+  
+  path.closePath();
+  return path;
+}
+
+// GFA Node class - ENHANCED: Rounded rendering
 class GfaNode {
   constructor(nodeData, scaleFactor = 1.0) {
     this.id = nodeData.id;
@@ -102,7 +218,7 @@ class GfaNode {
     this.outSubnode.y = this.y + sin * halfLength;
   }
 
-  // NEW: Calculate optimal rotation based on actual connected node positions
+  // Calculate optimal rotation based on actual connected node positions
   calculateOptimalRotation(allNodes, links) {
     const connections = { incoming: [], outgoing: [] };
     
@@ -172,7 +288,7 @@ class GfaNode {
     return optimalAngle;
   }
 
-  // NEW: Apply smooth rotation toward optimal angle
+  // Apply smooth rotation toward optimal angle
   applyDynamicRotation(allNodes, links, rotationStrength = 0.1) {
     const optimalAngle = this.calculateOptimalRotation(allNodes, links);
     
@@ -307,98 +423,15 @@ class GfaNode {
       ctx.lineWidth = Math.max(0.5, (isSelected ? 2 : 0.5) * transform.k);
     }
     
-    // Build the path
-    const path = new Path2D();
+    // Transform segments to screen coordinates
+    const transformedSegments = this.segments.map(segment => ({
+      x: segment.x * transform.k + transform.x,
+      y: segment.y * transform.k + transform.y
+    }));
     
-    // Calculate perpendiculars for all segments
-    const normals = [];
-    for (let i = 0; i < this.segments.length; i++) {
-      let dx = 0, dy = 0;
-      
-      if (i === 0) {
-        // First segment: use direction to next
-        dx = this.segments[1].x - this.segments[0].x;
-        dy = this.segments[1].y - this.segments[0].y;
-      } else if (i === this.segments.length - 1) {
-        // Last segment: use direction from previous
-        dx = this.segments[i].x - this.segments[i-1].x;
-        dy = this.segments[i].y - this.segments[i-1].y;
-      } else {
-        // Middle segments: average of directions
-        const dx1 = this.segments[i].x - this.segments[i-1].x;
-        const dy1 = this.segments[i].y - this.segments[i-1].y;
-        const dx2 = this.segments[i+1].x - this.segments[i].x;
-        const dy2 = this.segments[i+1].y - this.segments[i].y;
-        dx = (dx1 + dx2) / 2;
-        dy = (dy1 + dy2) / 2;
-      }
-      
-      const len = Math.sqrt(dx * dx + dy * dy);
-      if (len > 0) {
-        normals.push({ x: -dy / len, y: dx / len });
-      } else {
-        normals.push({ x: 0, y: 1 });
-      }
-    }
-    
-    // Start from the top of the first segment
-    const firstX = this.segments[0].x * transform.k + transform.x;
-    const firstY = this.segments[0].y * transform.k + transform.y;
+    // Create smooth rounded path
     const nodeWidth = isHighlighted ? effectiveWidth * 1.5 : effectiveWidth;
-    path.moveTo(
-      firstX + normals[0].x * nodeWidth / 2,
-      firstY + normals[0].y * nodeWidth / 2
-    );
-    
-    // Draw top edge
-    for (let i = 1; i < this.segments.length; i++) {
-      const x = this.segments[i].x * transform.k + transform.x;
-      const y = this.segments[i].y * transform.k + transform.y;
-      path.lineTo(
-        x + normals[i].x * nodeWidth / 2,
-        y + normals[i].y * nodeWidth / 2
-      );
-    }
-    
-    // Arrow head at the end
-    if (this.segments.length >= 2) {
-      const lastIdx = this.segments.length - 1;
-      const lastX = this.segments[lastIdx].x * transform.k + transform.x;
-      const lastY = this.segments[lastIdx].y * transform.k + transform.y;
-      const secondLastX = this.segments[lastIdx - 1].x * transform.k + transform.x;
-      const secondLastY = this.segments[lastIdx - 1].y * transform.k + transform.y;
-      
-      const dx = lastX - secondLastX;
-      const dy = lastY - secondLastY;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      
-      if (len > 0) {
-        const arrowLen = Math.min(nodeWidth * 1.5, len * 0.5);
-        const arrowX = dx / len * arrowLen;
-        const arrowY = dy / len * arrowLen;
-        
-        // Arrow tip
-        path.lineTo(lastX + arrowX, lastY + arrowY);
-        
-        // Arrow bottom
-        path.lineTo(
-          lastX - normals[lastIdx].x * nodeWidth / 2,
-          lastY - normals[lastIdx].y * nodeWidth / 2
-        );
-      }
-    }
-    
-    // Draw bottom edge (reverse)
-    for (let i = this.segments.length - 2; i >= 0; i--) {
-      const x = this.segments[i].x * transform.k + transform.x;
-      const y = this.segments[i].y * transform.k + transform.y;
-      path.lineTo(
-        x - normals[i].x * nodeWidth / 2,
-        y - normals[i].y * nodeWidth / 2
-      );
-    }
-    
-    path.closePath();
+    const path = createNodePath(transformedSegments, nodeWidth);
     
     // Fill and stroke
     ctx.fill(path);
@@ -508,7 +541,41 @@ function determineEdgeDirection(sourceNode, targetNode, linkData) {
   };
 }
 
-// ENHANCED: Main function with dynamic rotation
+// NEW: Create curved edge path using quadratic bezier
+function createCurvedEdgePath(startX, startY, endX, endY, curvature = 0.2) {
+  const path = new Path2D();
+  
+  // Calculate control point for the curve
+  const midX = (startX + endX) / 2;
+  const midY = (startY + endY) / 2;
+  
+  // Calculate perpendicular offset for curve
+  const dx = endX - startX;
+  const dy = endY - startY;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  
+  if (length > 0) {
+    // Perpendicular vector
+    const perpX = -dy / length;
+    const perpY = dx / length;
+    
+    // Control point offset (creates the curve)
+    const offset = length * curvature;
+    const controlX = midX + perpX * offset;
+    const controlY = midY + perpY * offset;
+    
+    path.moveTo(startX, startY);
+    path.quadraticCurveTo(controlX, controlY, endX, endY);
+  } else {
+    // Fallback for zero-length edges
+    path.moveTo(startX, startY);
+    path.lineTo(endX, endY);
+  }
+  
+  return path;
+}
+
+// ENHANCED: Main function with rounded nodes and curved edges
 export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, highlightedPath = null, scaleFactor = 1.0) {
   // Create GFA node objects if not already created or if scale changed
   if (!nodes._gfaNodes || nodes._lastScale !== scaleFactor) {
@@ -526,7 +593,7 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
       gfaNode.x = nodes[i].x;
       gfaNode.y = nodes[i].y;
       
-      // NEW: Apply dynamic rotation based on edge pull
+      // Apply dynamic rotation based on edge pull
       gfaNode.applyDynamicRotation(nodes, links, 0.05); // Gentle rotation strength
     }
   });
@@ -541,7 +608,7 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   
-  // Draw edges using subnodes for proper directionality
+  // Draw edges using curved paths
   ctx.globalAlpha = 0.6;
   links.forEach((link, index) => {
     const sourceGfaNode = nodes._gfaNodes.find(n => n.id === (link.source.id || link.source));
@@ -549,7 +616,7 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
     
     if (sourceGfaNode && targetGfaNode) {
       const isHighlighted = highlightedPath && highlightedPath.edges && highlightedPath.edges.has(index);
-      drawGfaEdgeWithSubnodes(ctx, transform, sourceGfaNode, targetGfaNode, link, isHighlighted);
+      drawCurvedGfaEdge(ctx, transform, sourceGfaNode, targetGfaNode, link, isHighlighted);
     }
   });
   ctx.globalAlpha = 1.0;
@@ -565,8 +632,8 @@ export function drawGfaGraph(ctx, canvas, transform, nodes, links, pinnedNodes, 
   ctx.restore();
 }
 
-// Draw GFA edge using subnodes for proper directionality
-function drawGfaEdgeWithSubnodes(ctx, transform, sourceNode, targetNode, linkData, isHighlighted = false) {
+// NEW: Draw curved GFA edge
+function drawCurvedGfaEdge(ctx, transform, sourceNode, targetNode, linkData, isHighlighted = false) {
   const edgeInfo = determineEdgeDirection(sourceNode, targetNode, linkData);
   const start = edgeInfo.fromSubnode;
   const end = edgeInfo.toSubnode;
@@ -589,11 +656,11 @@ function drawGfaEdgeWithSubnodes(ctx, transform, sourceNode, targetNode, linkDat
   const endX = end.x * transform.k + transform.x;
   const endY = end.y * transform.k + transform.y;
   
-  // Draw straight line between subnodes
-  ctx.beginPath();
-  ctx.moveTo(startX, startY);
-  ctx.lineTo(endX, endY);
-  ctx.stroke();
-  // Small Fix
+  // Create curved path
+  const curvature = 0.1; // Adjust this value to control curve intensity
+  const curvedPath = createCurvedEdgePath(startX, startY, endX, endY, curvature);
+  
+  ctx.stroke(curvedPath);
+  
   ctx.restore();
 }
