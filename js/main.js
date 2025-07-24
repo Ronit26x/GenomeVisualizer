@@ -1,4 +1,4 @@
-// main.js - ENHANCED: Added vertex resolution functionality
+// main.js - FINAL DEBUG VERSION: Enhanced vertex resolution debugging with outgoing edge fix
 
 import { parseDot, parseGfa }       from './parser.js';
 import { createSimulation }         from './simulation.js';
@@ -126,20 +126,103 @@ function flipSelected() {
   }
 }
 
-// NEW: Vertex Resolution Functions
+// DEBUG: Pre-resolution debugging function
+function debugVertexConnections(vertexId) {
+  console.log('=== PRE-RESOLUTION DEBUG ===');
+  console.log('Debugging vertex:', vertexId);
+  
+  const vertex = nodes.find(n => n.id === vertexId);
+  console.log('Vertex object:', vertex);
+  
+  console.log('\n=== ALL LINKS IN GRAPH ===');
+  links.forEach((link, index) => {
+    const sourceId = (typeof link.source === 'object') ? link.source.id : link.source;
+    const targetId = (typeof link.target === 'object') ? link.target.id : link.target;
+    
+    if (sourceId === vertexId || targetId === vertexId) {
+      console.log(`Link ${index}:`, {
+        sourceId,
+        targetId,
+        sourceType: typeof link.source,
+        targetType: typeof link.target,
+        fullLink: link
+      });
+    }
+  });
+  
+  const connections = getVertexConnections(vertexId);
+  console.log('\n=== PARSED CONNECTIONS ===');
+  console.log('Incoming connections:', connections.incoming);
+  console.log('Outgoing connections:', connections.outgoing);
+  
+  const combinations = generatePathCombinations(connections.incoming, connections.outgoing);
+  console.log('\n=== GENERATED COMBINATIONS ===');
+  combinations.forEach((combo, index) => {
+    console.log(`Combo ${index}:`, {
+      description: combo.description,
+      hasIncoming: !!combo.incoming,
+      hasOutgoing: !!combo.outgoing,
+      incomingDetails: combo.incoming ? {
+        sourceId: combo.incoming.sourceId,
+        linkIndex: combo.incoming.linkIndex
+      } : null,
+      outgoingDetails: combo.outgoing ? {
+        targetId: combo.outgoing.targetId,
+        linkIndex: combo.outgoing.linkIndex
+      } : null
+    });
+  });
+}
+
+// DEBUG: Edge creation validation
+function debugEdgeCreation(newLinks, newNodes) {
+  console.log('\n=== EDGE CREATION DEBUG ===');
+  
+  // Check if all expected source/target nodes exist
+  const nodeIds = new Set(nodes.map(n => n.id));
+  
+  newLinks.forEach((link, index) => {
+    const sourceExists = nodeIds.has(link.source);
+    const targetExists = nodeIds.has(link.target);
+    
+    console.log(`Edge ${index}: ${link.source} → ${link.target}`);
+    console.log(`  Source exists: ${sourceExists}, Target exists: ${targetExists}`);
+    
+    if (!sourceExists) {
+      console.error(`❌ Source node "${link.source}" does not exist in graph!`);
+    }
+    if (!targetExists) {
+      console.error(`❌ Target node "${link.target}" does not exist in graph!`);
+    }
+  });
+  
+  // Check if any source nodes are the original vertex (shouldn't happen)
+  newLinks.forEach(link => {
+    if (link.source === window.currentResolution.vertex.id) {
+      console.error(`❌ Edge still references original vertex ${link.source} as source!`);
+    }
+    if (link.target === window.currentResolution.vertex.id) {
+      console.error(`❌ Edge still references original vertex ${link.target} as target!`);
+    }
+  });
+}
+
+// FIXED: Vertex Resolution Functions with enhanced debugging
 function getVertexConnections(vertexId) {
   const incoming = [];
   const outgoing = [];
 
   links.forEach((link, index) => {
-    const sourceId = link.source.id || link.source;
-    const targetId = link.target.id || link.target;
+    // Handle both string IDs and object references (post-simulation)
+    const sourceId = (typeof link.source === 'object') ? link.source.id : link.source;
+    const targetId = (typeof link.target === 'object') ? link.target.id : link.target;
 
     if (targetId === vertexId) {
       incoming.push({
         linkIndex: index,
         link: link,
         sourceId: sourceId,
+        sourceNode: (typeof link.source === 'object') ? link.source : nodes.find(n => n.id === sourceId),
         orientation: link.tgtOrientation || '+'
       });
     }
@@ -148,11 +231,13 @@ function getVertexConnections(vertexId) {
         linkIndex: index,
         link: link,
         targetId: targetId,
+        targetNode: (typeof link.target === 'object') ? link.target : nodes.find(n => n.id === targetId),
         orientation: link.srcOrientation || '+'
       });
     }
   });
 
+  console.log(`Vertex ${vertexId}: ${incoming.length} incoming, ${outgoing.length} outgoing edges`);
   return { incoming, outgoing };
 }
 
@@ -195,6 +280,7 @@ function generatePathCombinations(incoming, outgoing) {
     });
   }
 
+  console.log(`Generated ${combinations.length} path combinations`);
   return combinations;
 }
 
@@ -277,6 +363,7 @@ function hideResolveDialog() {
   window.currentResolution = null;
 }
 
+// UPDATED performVertexResolution with enhanced outgoing edge debugging
 function performVertexResolution() {
   if (!window.currentResolution) return;
 
@@ -294,74 +381,169 @@ function performVertexResolution() {
     return;
   }
 
+  console.log('=== VERTEX RESOLUTION DEBUG ===');
+  console.log('Original vertex:', vertex.id);
+  console.log('Selected combinations:', selectedCombos.length);
+  
   logEvent(`Resolving vertex ${vertex.id} into ${selectedCombos.length} copies`);
 
-  // Create new nodes for each selected combination
+  // Create new nodes first
   const newNodes = [];
-  const newLinks = [];
-
   selectedCombos.forEach((combo, index) => {
-    // Create new vertex
     const newNodeId = selectedCombos.length === 1 ? vertex.id : `${vertex.id}_${index + 1}`;
     const newNode = {
       ...vertex,
       id: newNodeId,
       originalId: vertex.id,
-      pathDescription: combo.description
+      pathDescription: combo.description,
+      x: vertex.x,
+      y: vertex.y,
+      vx: 0,
+      vy: 0
     };
     
-    // Position new nodes near original (with slight offset for multiple copies)
     if (selectedCombos.length > 1) {
       const angleOffset = (index * 2 * Math.PI) / selectedCombos.length;
-      const radius = 30;
+      const radius = 60;
       newNode.x = vertex.x + radius * Math.cos(angleOffset);
       newNode.y = vertex.y + radius * Math.sin(angleOffset);
     }
 
     newNodes.push(newNode);
-
-    // Create links for this path
-    if (combo.incoming) {
-      newLinks.push({
-        ...combo.incoming.link,
-        target: newNodeId,
-        source: combo.incoming.sourceId
-      });
-    }
-
-    if (combo.outgoing) {
-      newLinks.push({
-        ...combo.outgoing.link,
-        source: newNodeId,
-        target: combo.outgoing.targetId
-      });
-    }
   });
 
-  // Remove original vertex and its edges
+  // Remove original vertex FIRST (before creating edges)
+  console.log('\n=== REMOVING ORIGINAL VERTEX ===');
+  const originalNodeCount = nodes.length;
   nodes = nodes.filter(n => n.id !== vertex.id);
-  links = links.filter(l => {
-    const sourceId = l.source.id || l.source;
-    const targetId = l.target.id || l.target;
-    return sourceId !== vertex.id && targetId !== vertex.id;
+  console.log(`Removed vertex ${vertex.id}`);
+
+  // Remove original edges SECOND
+  console.log('\n=== REMOVING ORIGINAL EDGES ===');
+  const originalLinksCount = links.length;
+  links = links.filter(link => {
+    const sourceId = (typeof link.source === 'object') ? link.source.id : link.source;
+    const targetId = (typeof link.target === 'object') ? link.target.id : link.target;
+    const shouldRemove = sourceId === vertex.id || targetId === vertex.id;
+    if (shouldRemove) {
+      console.log(`Removing edge: ${sourceId} → ${targetId}`);
+    }
+    return !shouldRemove;
+  });
+  console.log(`Removed ${originalLinksCount - links.length} edges`);
+
+  // Add new nodes THIRD
+  console.log('\n=== ADDING NEW NODES ===');
+  nodes.push(...newNodes);
+  newNodes.forEach(node => {
+    console.log(`Added node: ${node.id}`);
   });
 
-  // Add new nodes and links
-  nodes.push(...newNodes);
-  links.push(...newLinks);
+  // Create and add new edges LAST - ENHANCED DEBUGGING
+  console.log('\n=== CREATING NEW EDGES ===');
+  const newLinks = [];
 
-  // Clear selection
+  selectedCombos.forEach((combo, index) => {
+    const newNodeId = selectedCombos.length === 1 ? vertex.id : `${vertex.id}_${index + 1}`;
+    
+    console.log(`\nProcessing combo ${index} for node ${newNodeId}:`);
+    console.log(`  Description: ${combo.description}`);
+    console.log(`  Combo object:`, combo);
+
+    // Create INCOMING edge
+    if (combo.incoming) {
+      const sourceId = combo.incoming.sourceId;
+      
+      console.log(`  Processing incoming edge from ${sourceId}`);
+      
+      // Verify source node exists
+      const sourceNode = nodes.find(n => n.id === sourceId);
+      if (!sourceNode) {
+        console.error(`❌ Source node ${sourceId} not found for incoming edge!`);
+        console.log(`Available nodes:`, nodes.map(n => n.id));
+      } else {
+        const newIncomingLink = {
+          source: sourceId,
+          target: newNodeId,
+          srcOrientation: combo.incoming.link.srcOrientation,
+          tgtOrientation: combo.incoming.link.tgtOrientation,
+          gfaType: combo.incoming.link.gfaType,
+          overlap: combo.incoming.link.overlap
+        };
+        
+        newLinks.push(newIncomingLink);
+        console.log(`✓ Created incoming: ${sourceId} → ${newNodeId}`);
+      }
+    } else {
+      console.log(`⚠ No incoming edge for this combo`);
+    }
+
+    // Create OUTGOING edge - ENHANCED DEBUGGING
+    if (combo.outgoing) {
+      const targetId = combo.outgoing.targetId;
+      
+      console.log(`  Processing outgoing edge to ${targetId}`);
+      
+      // Verify target node exists
+      const targetNode = nodes.find(n => n.id === targetId);
+      if (!targetNode) {
+        console.error(`❌ Target node ${targetId} not found for outgoing edge!`);
+        console.log(`Available nodes:`, nodes.map(n => n.id));
+      } else {
+        const newOutgoingLink = {
+          source: newNodeId,
+          target: targetId,
+          srcOrientation: combo.outgoing.link.srcOrientation,
+          tgtOrientation: combo.outgoing.link.tgtOrientation,
+          gfaType: combo.outgoing.link.gfaType,
+          overlap: combo.outgoing.link.overlap
+        };
+        
+        newLinks.push(newOutgoingLink);
+        console.log(`✓ Created outgoing: ${newNodeId} → ${targetId}`);
+      }
+    } else {
+      console.log(`❌ No outgoing edge for this combo - combo.outgoing is:`, combo.outgoing);
+    }
+  });
+
+  // Debug the edges we're about to add
+  debugEdgeCreation(newLinks, newNodes);
+
+  // Add new edges
+  console.log(`\n=== ADDING ${newLinks.length} NEW EDGES ===`);
+  links.push(...newLinks);
+  
+  console.log(`Final graph: ${nodes.length} nodes, ${links.length} edges`);
+
+  // Clear selection and UI state
   selected.nodes.clear();
   pinnedNodes.delete(vertex.id);
-
-  // Update UI
   updateResolveButton();
   hideResolveDialog();
 
   // Restart simulation
+  console.log('\n=== RESTARTING SIMULATION ===');
   startSimulation();
 
-  logEvent(`Vertex resolution complete: created ${newNodes.length} new vertices`);
+  // Verify after simulation starts
+  setTimeout(() => {
+    console.log('\n=== POST-SIMULATION VERIFICATION ===');
+    newNodes.forEach(node => {
+      const nodeConnections = getVertexConnections(node.id);
+      console.log(`${node.id}: ${nodeConnections.incoming.length} incoming, ${nodeConnections.outgoing.length} outgoing`);
+      
+      // Show the actual connections for debugging
+      if (nodeConnections.incoming.length === 0) {
+        console.error(`❌ ${node.id} has NO incoming connections!`);
+      }
+      if (nodeConnections.outgoing.length === 0) {
+        console.error(`❌ ${node.id} has NO outgoing connections!`);
+      }
+    });
+  }, 100);
+
+  logEvent(`Vertex resolution complete: created ${newNodes.length} new vertices with ${newLinks.length} edges`);
 }
 
 function updateResolveButton() {
@@ -501,6 +683,9 @@ function selectNode(evt) {
     infoHTML += `<pre>${JSON.stringify(found,null,2)}</pre>`;
     
     document.getElementById('infoContent').innerHTML = infoHTML;
+    
+    // DEBUG: Add pre-resolution debugging
+    debugVertexConnections(found.id);
     
     // Update resolve button state
     updateResolveButton();
