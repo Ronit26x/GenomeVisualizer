@@ -28,12 +28,59 @@
       </div>
       
       <button id="redraw">Redraw Layout</button>
-      <div id="pathInput">
-        <label for="pathSequence">Path Sequence:</label>
-        <input type="text" id="pathSequence" placeholder="e.g. 1,2,3,4" />
-        <button id="highlightPath">Highlight Path</button>
+      
+      <!-- ENHANCED PATH MANAGEMENT SECTION -->
+      <div id="pathManagement">
+        <h4>Path Management</h4>
+        
+        <!-- Path Input Section -->
+        <div class="path-input-section">
+          <label for="pathSequence">Path Sequence:</label>
+          <input type="text" id="pathSequence" placeholder="e.g. 1,2,3,4" />
+          
+          <label for="pathName">Path Name (optional):</label>
+          <input type="text" id="pathName" placeholder="e.g. Main Assembly Path" />
+          
+          <div class="path-buttons">
+            <button id="savePath" class="save-btn">Save Path</button>
+            <button id="highlightPath" class="highlight-btn">Quick View</button>
+          </div>
+          
+          <div class="path-help">
+            <small>
+              <strong>Enter:</strong> Quick view &nbsp;
+              <strong>Ctrl+Enter:</strong> Save path
+            </small>
+          </div>
+        </div>
+        
+        <!-- Path Navigation -->
+        <div id="pathNavigation" style="display: none;">
+          <div class="nav-header">
+            <span id="pathCounter">0 paths saved</span>
+            <button id="clearAllPaths" class="clear-all-btn">Clear All</button>
+          </div>
+          
+          <div class="nav-controls">
+            <button id="prevPath" class="nav-btn">‹ Prev</button>
+            <div id="currentPathDisplay">No paths</div>
+            <button id="nextPath" class="nav-btn">Next ›</button>
+          </div>
+          
+          <div class="keyboard-shortcuts">
+            <small>
+              <strong>Ctrl+←/→:</strong> Navigate &nbsp;
+              <strong>Esc:</strong> Clear highlights
+            </small>
+          </div>
+        </div>
+        
+        <!-- Saved Paths List -->
+        <div id="savedPathsList">
+          <div class="no-paths">No saved paths</div>
+        </div>
       </div>
-      <button id="clearPaths">Clear Path Highlights</button>
+      
       <button id="removeNodes">Remove Selected Nodes</button>
       <button id="undo">Undo</button>
       

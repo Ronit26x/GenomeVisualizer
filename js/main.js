@@ -1,4 +1,4 @@
-// main.js - COMPLETE: Enhanced with both logical and physical vertex resolution
+// main.js - COMPLETE: Enhanced with multi-path highlighting system
 
 import { parseDot, parseGfa }       from './parser.js';
 import { createSimulation }         from './simulation.js';
@@ -13,7 +13,30 @@ let simulation, nodes = [], links = [], history = [];
 let currentFormat = 'dot'; // Track current format
 const selected    = { nodes: new Set(), edges: new Set() };
 const pinnedNodes = new Set();
-const highlightedPath = { nodes: new Set(), edges: new Set() }; // Track highlighted path
+const highlightedPath = { nodes: new Set(), edges: new Set(), currentColor: '#ff6b6b' }; // Track highlighted path with color
+
+// NEW: Multi-path management state
+let savedPaths = []; // Array of saved path objects
+let currentPathIndex = -1; // Index of currently displayed path (-1 = none)
+let nextPathId = 1; // Counter for generating unique path IDs
+
+// Color palette for different paths
+const PATH_COLORS = [
+  '#ff6b6b', // Red
+  '#4ecdc4', // Teal
+  '#45b7d1', // Blue
+  '#96ceb4', // Green
+  '#feca57', // Yellow
+  '#ff9ff3', // Pink
+  '#54a0ff', // Light Blue
+  '#5f27cd', // Purple
+  '#00d2d3', // Cyan
+  '#ff9f43'  // Orange
+];
+
+function getNextPathColor() {
+  return PATH_COLORS[(savedPaths.length) % PATH_COLORS.length];
+}
 
 function logEvent(msg) {
   document.getElementById('debug').innerText += msg + '\n';
@@ -257,7 +280,7 @@ function generatePathCombinations(incoming, outgoing) {
   return combinations;
 }
 
-// PHYSICAL RESOLUTION FUNCTIONS (new)
+// PHYSICAL RESOLUTION FUNCTIONS (existing)
 function getPhysicalConnections(vertexId) {
   const redConnections = [];   // Edges connected to red subnode (incoming end)
   const greenConnections = [];  // Edges connected to green subnode (outgoing end)
@@ -795,13 +818,10 @@ function updatePhysicalResolveButton() {
   }
 }
 
-function highlightPaths(sequence) {
-  // Clear previous highlights
-  highlightedPath.nodes.clear();
-  highlightedPath.edges.clear();
-  
+// NEW: Enhanced highlightPaths function for multi-path management
+function highlightPaths(sequence, pathName = null) {
   if (!sequence || !sequence.trim()) {
-    drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
+    logEvent('No sequence provided');
     return;
   }
   
@@ -817,35 +837,176 @@ function highlightPaths(sequence) {
     return;
   }
   
-  // Highlight nodes
-  validNodes.forEach(id => highlightedPath.nodes.add(id));
+  // Create new path object
+  const pathNodes = new Set(validNodes);
+  const pathEdges = new Set();
   
-  // Highlight edges between consecutive nodes
+  // Find edges between consecutive nodes
   for (let i = 0; i < validNodes.length - 1; i++) {
     const sourceId = validNodes[i];
     const targetId = validNodes[i + 1];
     
-    // Find edge between these nodes
     links.forEach((link, index) => {
       const linkSourceId = String(link.source.id || link.source);
       const linkTargetId = String(link.target.id || link.target);
       
       if ((linkSourceId === sourceId && linkTargetId === targetId) ||
           (linkSourceId === targetId && linkTargetId === sourceId)) {
-        highlightedPath.edges.add(index);
+        pathEdges.add(index);
       }
     });
   }
   
-  logEvent(`Highlighted path: ${validNodes.join(' → ')}`);
+  const newPath = {
+    id: nextPathId++,
+    name: pathName || `Path ${savedPaths.length + 1}`,
+    sequence: sequence.trim(),
+    nodes: pathNodes,
+    edges: pathEdges,
+    color: getNextPathColor(),
+    timestamp: new Date()
+  };
+  
+  // Add to saved paths
+  savedPaths.push(newPath);
+  currentPathIndex = savedPaths.length - 1;
+  
+  // Update current highlight
+  highlightedPath.nodes = new Set(pathNodes);
+  highlightedPath.edges = new Set(pathEdges);
+  highlightedPath.currentColor = newPath.color;
+  
+  updatePathUI();
+  logEvent(`Saved path "${newPath.name}": ${validNodes.join(' → ')}`);
   drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
 
-function clearPaths() {
+function showPath(index) {
+  if (index < 0 || index >= savedPaths.length) {
+    // Clear highlighting
+    currentPathIndex = -1;
+    highlightedPath.nodes.clear();
+    highlightedPath.edges.clear();
+    highlightedPath.currentColor = '#ff6b6b';
+  } else {
+    // Show selected path
+    currentPathIndex = index;
+    const path = savedPaths[index];
+    highlightedPath.nodes = new Set(path.nodes);
+    highlightedPath.edges = new Set(path.edges);
+    highlightedPath.currentColor = path.color;
+    
+    logEvent(`Showing path "${path.name}": ${path.sequence}`);
+  }
+  
+  updatePathUI();
+  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
+}
+
+function deletePath(index) {
+  if (index < 0 || index >= savedPaths.length) return;
+  
+  const deletedPath = savedPaths[index];
+  savedPaths.splice(index, 1);
+  
+  // Adjust current index
+  if (currentPathIndex === index) {
+    currentPathIndex = -1;
+    highlightedPath.nodes.clear();
+    highlightedPath.edges.clear();
+  } else if (currentPathIndex > index) {
+    currentPathIndex--;
+  }
+  
+  updatePathUI();
+  logEvent(`Deleted path "${deletedPath.name}"`);
+  drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
+}
+
+function clearAllPaths() {
+  savedPaths = [];
+  currentPathIndex = -1;
   highlightedPath.nodes.clear();
   highlightedPath.edges.clear();
-  logEvent('Cleared path highlights');
+  highlightedPath.currentColor = '#ff6b6b';
+  nextPathId = 1;
+  
+  updatePathUI();
+  logEvent('Cleared all saved paths');
   drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
+}
+
+function updatePathUI() {
+  const pathList = document.getElementById('savedPathsList');
+  const pathNav = document.getElementById('pathNavigation');
+  const pathCounter = document.getElementById('pathCounter');
+  
+  // Update path list
+  pathList.innerHTML = '';
+  
+  if (savedPaths.length === 0) {
+    pathList.innerHTML = '<div class="no-paths">No saved paths</div>';
+    pathNav.style.display = 'none';
+    pathCounter.textContent = '0 paths saved';
+  } else {
+    pathNav.style.display = 'flex';
+    pathCounter.textContent = `${savedPaths.length} path${savedPaths.length === 1 ? '' : 's'} saved`;
+    
+    savedPaths.forEach((path, index) => {
+      const pathDiv = document.createElement('div');
+      pathDiv.className = `saved-path ${index === currentPathIndex ? 'active' : ''}`;
+      
+      pathDiv.innerHTML = `
+        <div class="path-header">
+          <span class="path-color" style="background-color: ${path.color}"></span>
+          <span class="path-name">${path.name}</span>
+          <button class="delete-path" onclick="deletePath(${index})" title="Delete path">×</button>
+        </div>
+        <div class="path-sequence">${path.sequence}</div>
+        <div class="path-stats">${path.nodes.size} nodes, ${path.edges.size} edges</div>
+      `;
+      
+      // Click to show path
+      pathDiv.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('delete-path')) {
+          showPath(index === currentPathIndex ? -1 : index); // Toggle if clicking current
+        }
+      });
+      
+      pathList.appendChild(pathDiv);
+    });
+  }
+  
+  // Update navigation buttons
+  const prevBtn = document.getElementById('prevPath');
+  const nextBtn = document.getElementById('nextPath');
+  const clearBtn = document.getElementById('clearAllPaths');
+  
+  prevBtn.disabled = savedPaths.length === 0;
+  nextBtn.disabled = savedPaths.length === 0;
+  clearBtn.disabled = savedPaths.length === 0;
+  
+  // Update current path display in navigation
+  const currentPathDisplay = document.getElementById('currentPathDisplay');
+  if (currentPathIndex >= 0) {
+    const currentPath = savedPaths[currentPathIndex];
+    currentPathDisplay.textContent = `${currentPath.name} (${currentPathIndex + 1}/${savedPaths.length})`;
+  } else {
+    currentPathDisplay.textContent = savedPaths.length > 0 ? `None selected (0/${savedPaths.length})` : 'No paths';
+  }
+}
+
+function navigatePath(direction) {
+  if (savedPaths.length === 0) return;
+  
+  let newIndex;
+  if (direction === 'prev') {
+    newIndex = currentPathIndex <= 0 ? savedPaths.length - 1 : currentPathIndex - 1;
+  } else {
+    newIndex = currentPathIndex >= savedPaths.length - 1 ? 0 : currentPathIndex + 1;
+  }
+  
+  showPath(newIndex);
 }
 
 function removeSelected() {
@@ -985,11 +1146,11 @@ document.getElementById('dialogOverlay').addEventListener('click', hideResolveDi
 
 setupUI({
   canvas,
-  onFileLoad:    parseGraph,
-  onGenerate:    generateRandom,
-  onPin:         pinSelected,
-  onFlip:        flipSelected,
-  onResolve:     () => {
+  onFileLoad: parseGraph,
+  onGenerate: generateRandom,
+  onPin: pinSelected,
+  onFlip: flipSelected,
+  onResolve: () => {
     if (selected.nodes.size === 1) {
       const vertexId = Array.from(selected.nodes)[0];
       showResolveDialog(vertexId);
@@ -1001,13 +1162,31 @@ setupUI({
       showPhysicalResolveDialog(vertexId);
     }
   },
-  onRedraw:      startSimulation,
-  onHighlightPath: highlightPaths,
-  onClearPaths:     clearPaths,
-  onRemoveNodes:    removeSelected,
-  onUndo:            undo,
-  onSelectNode:      selectNode
+  onRedraw: startSimulation,
+  onHighlightPath: (sequence, pathName) => highlightPaths(sequence, pathName),
+  onClearPaths: clearAllPaths,
+  onNavigatePath: navigatePath,
+  onRemoveNodes: removeSelected,
+  onUndo: undo,
+  onSelectNode: selectNode
 });
+
+// Make functions globally available for UI
+window.deletePath = deletePath;
+window.showPath = showPath;
+window.navigatePath = navigatePath;
+
+// Make global references available for renderer
+window.highlightedPath = highlightedPath;
+window.nodes = nodes;
+window.links = links;
+window.ctx = ctx;
+window.canvas = canvas;
+window.transform = transform;
+window.pinnedNodes = pinnedNodes;
+window.selected = selected;
+window.currentFormat = currentFormat;
+window.drawGraph = drawGraph;
 
 // initial render
 startSimulation();

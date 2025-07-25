@@ -113,6 +113,8 @@ function createNodePath(segments, width) {
       path.quadraticCurveTo(controlX, controlY, currPoint.x, currPoint.y);
     }
   }
+
+  
   
   // Rounded end cap with arrow
   const lastTop = topPoints[topPoints.length - 1];
