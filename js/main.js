@@ -1,4 +1,4 @@
-// main.js - FINAL DEBUG VERSION: Enhanced vertex resolution debugging with outgoing edge fix
+// main.js - COMPLETE: Enhanced with both logical and physical vertex resolution
 
 import { parseDot, parseGfa }       from './parser.js';
 import { createSimulation }         from './simulation.js';
@@ -172,42 +172,15 @@ function debugVertexConnections(vertexId) {
       } : null
     });
   });
+  
+  // Also debug physical connections
+  const physicalConnections = getPhysicalConnections(vertexId);
+  console.log('\n=== PHYSICAL CONNECTIONS ===');
+  console.log('Red subnode connections:', physicalConnections.red);
+  console.log('Green subnode connections:', physicalConnections.green);
 }
 
-// DEBUG: Edge creation validation
-function debugEdgeCreation(newLinks, newNodes) {
-  console.log('\n=== EDGE CREATION DEBUG ===');
-  
-  // Check if all expected source/target nodes exist
-  const nodeIds = new Set(nodes.map(n => n.id));
-  
-  newLinks.forEach((link, index) => {
-    const sourceExists = nodeIds.has(link.source);
-    const targetExists = nodeIds.has(link.target);
-    
-    console.log(`Edge ${index}: ${link.source} → ${link.target}`);
-    console.log(`  Source exists: ${sourceExists}, Target exists: ${targetExists}`);
-    
-    if (!sourceExists) {
-      console.error(`❌ Source node "${link.source}" does not exist in graph!`);
-    }
-    if (!targetExists) {
-      console.error(`❌ Target node "${link.target}" does not exist in graph!`);
-    }
-  });
-  
-  // Check if any source nodes are the original vertex (shouldn't happen)
-  newLinks.forEach(link => {
-    if (link.source === window.currentResolution.vertex.id) {
-      console.error(`❌ Edge still references original vertex ${link.source} as source!`);
-    }
-    if (link.target === window.currentResolution.vertex.id) {
-      console.error(`❌ Edge still references original vertex ${link.target} as target!`);
-    }
-  });
-}
-
-// FIXED: Vertex Resolution Functions with enhanced debugging
+// LOGICAL RESOLUTION FUNCTIONS (existing)
 function getVertexConnections(vertexId) {
   const incoming = [];
   const outgoing = [];
@@ -284,6 +257,121 @@ function generatePathCombinations(incoming, outgoing) {
   return combinations;
 }
 
+// PHYSICAL RESOLUTION FUNCTIONS (new)
+function getPhysicalConnections(vertexId) {
+  const redConnections = [];   // Edges connected to red subnode (incoming end)
+  const greenConnections = [];  // Edges connected to green subnode (outgoing end)
+
+  links.forEach((link, index) => {
+    const sourceId = (typeof link.source === 'object') ? link.source.id : link.source;
+    const targetId = (typeof link.target === 'object') ? link.target.id : link.target;
+    
+    // Check if this link involves our vertex
+    if (sourceId === vertexId) {
+      // This vertex is the SOURCE of the edge
+      const srcOrientation = link.srcOrientation || '+';
+      
+      if (srcOrientation === '+') {
+        // Positive orientation: edge leaves from green subnode (outgoing end)
+        greenConnections.push({
+          linkIndex: index,
+          link: link,
+          targetId: targetId,
+          targetNode: (typeof link.target === 'object') ? link.target : nodes.find(n => n.id === targetId),
+          orientation: srcOrientation,
+          direction: 'outgoing'
+        });
+      } else {
+        // Negative orientation: edge leaves from red subnode (incoming end)
+        redConnections.push({
+          linkIndex: index,
+          link: link,
+          targetId: targetId,
+          targetNode: (typeof link.target === 'object') ? link.target : nodes.find(n => n.id === targetId),
+          orientation: srcOrientation,
+          direction: 'outgoing'
+        });
+      }
+    }
+    
+    if (targetId === vertexId) {
+      // This vertex is the TARGET of the edge
+      const tgtOrientation = link.tgtOrientation || '+';
+      
+      if (tgtOrientation === '+') {
+        // Positive orientation: edge enters through red subnode (incoming end)
+        redConnections.push({
+          linkIndex: index,
+          link: link,
+          sourceId: sourceId,
+          sourceNode: (typeof link.source === 'object') ? link.source : nodes.find(n => n.id === sourceId),
+          orientation: tgtOrientation,
+          direction: 'incoming'
+        });
+      } else {
+        // Negative orientation: edge enters through green subnode (outgoing end)
+        greenConnections.push({
+          linkIndex: index,
+          link: link,
+          sourceId: sourceId,
+          sourceNode: (typeof link.source === 'object') ? link.source : nodes.find(n => n.id === sourceId),
+          orientation: tgtOrientation,
+          direction: 'incoming'
+        });
+      }
+    }
+  });
+
+  console.log(`Physical connections for ${vertexId}: ${redConnections.length} red subnode, ${greenConnections.length} green subnode`);
+  return { red: redConnections, green: greenConnections };
+}
+
+function generatePhysicalCombinations(redConnections, greenConnections) {
+  const combinations = [];
+  
+  // If no red connections, create combinations with just green
+  if (redConnections.length === 0) {
+    greenConnections.forEach(green => {
+      combinations.push({
+        red: null,
+        green: green,
+        id: `start_${green.targetId || green.sourceId}`,
+        description: `Start → ${green.targetId || green.sourceId} (green)`
+      });
+    });
+  }
+  // If no green connections, create combinations with just red
+  else if (greenConnections.length === 0) {
+    redConnections.forEach(red => {
+      combinations.push({
+        red: red,
+        green: null,
+        id: `${red.sourceId || red.targetId}_end`,
+        description: `${red.sourceId || red.targetId} (red) → End`
+      });
+    });
+  }
+  // Normal case: all combinations of red and green connections
+  else {
+    redConnections.forEach(red => {
+      greenConnections.forEach(green => {
+        const redNode = red.sourceId || red.targetId;
+        const greenNode = green.targetId || green.sourceId;
+        combinations.push({
+          red: red,
+          green: green,
+          id: `${redNode}_${greenNode}`,
+          description: `${redNode} (red) ↔ ${greenNode} (green)`
+        });
+      });
+    });
+  }
+
+  console.log(`Generated ${combinations.length} physical combinations`);
+  return combinations;
+}
+
+// SHARED DIALOG FUNCTIONS
 function showResolveDialog(vertexId) {
   const vertex = nodes.find(n => n.id === vertexId);
   if (!vertex) return;
@@ -293,10 +381,11 @@ function showResolveDialog(vertexId) {
 
   // Populate vertex info
   document.getElementById('vertexInfo').innerHTML = `
-    <strong>Vertex:</strong> ${vertexId}<br>
+    <strong>Logical Resolution for Vertex:</strong> ${vertexId}<br>
     <strong>Incoming edges:</strong> ${connections.incoming.length}<br>
     <strong>Outgoing edges:</strong> ${connections.outgoing.length}<br>
-    <strong>Possible paths:</strong> ${combinations.length}
+    <strong>Possible paths:</strong> ${combinations.length}<br>
+    <em>Note: Based on logical graph connections (source → target)</em>
   `;
 
   // Populate path combinations
@@ -352,18 +441,87 @@ function showResolveDialog(vertexId) {
   document.getElementById('resolveDialog').style.display = 'block';
 }
 
+function showPhysicalResolveDialog(vertexId) {
+  const vertex = nodes.find(n => n.id === vertexId);
+  if (!vertex) return;
+
+  const connections = getPhysicalConnections(vertexId);
+  const combinations = generatePhysicalCombinations(connections.red, connections.green);
+
+  // Populate vertex info
+  document.getElementById('vertexInfo').innerHTML = `
+    <strong>Physical Resolution for Vertex:</strong> ${vertexId}<br>
+    <strong>Red subnode connections:</strong> ${connections.red.length}<br>
+    <strong>Green subnode connections:</strong> ${connections.green.length}<br>
+    <strong>Physical path combinations:</strong> ${combinations.length}<br>
+    <em>Note: Based on physical red/green subnode connections</em>
+  `;
+
+  // Populate path combinations
+  const pathContainer = document.getElementById('pathCombinations');
+  pathContainer.innerHTML = '';
+
+  combinations.forEach((combo, index) => {
+    const div = document.createElement('div');
+    div.className = 'path-combination physical-combination';
+    
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = `physical_path_${index}`;
+    checkbox.checked = true; // Default to all selected
+    checkbox.dataset.comboIndex = index;
+
+    const label = document.createElement('label');
+    label.setAttribute('for', `physical_path_${index}`);
+    
+    let labelHTML = `<span class="red-connection">${combo.red ? (combo.red.sourceId || combo.red.targetId) : 'NONE'}</span>`;
+    labelHTML += ` → <strong>${vertexId}</strong> → `;
+    labelHTML += `<span class="green-connection">${combo.green ? (combo.green.targetId || combo.green.sourceId) : 'NONE'}</span>`;
+    labelHTML += `<span class="edge-info">(${combo.description})</span>`;
+
+    label.innerHTML = labelHTML;
+    
+    div.appendChild(checkbox);
+    div.appendChild(label);
+    pathContainer.appendChild(div);
+  });
+
+  // Update stats
+  updateResolutionStats(combinations.length, combinations.length);
+
+  // Add event listeners for checkboxes
+  pathContainer.addEventListener('change', () => {
+    const checked = pathContainer.querySelectorAll('input[type="checkbox"]:checked').length;
+    updateResolutionStats(combinations.length, checked);
+  });
+
+  // Store data for resolution
+  window.currentPhysicalResolution = {
+    vertex: vertex,
+    combinations: combinations,
+    connections: connections
+  };
+
+  // Show dialog with physical resolution mode
+  document.getElementById('physicalModeIndicator').style.display = 'block';
+  document.getElementById('dialogOverlay').style.display = 'block';
+  document.getElementById('resolveDialog').style.display = 'block';
+}
+
 function updateResolutionStats(total, selected) {
   document.getElementById('resolutionStats').textContent = 
     `${selected} of ${total} paths selected. ${total - selected} paths will be removed.`;
 }
 
 function hideResolveDialog() {
+  document.getElementById('physicalModeIndicator').style.display = 'none';
   document.getElementById('dialogOverlay').style.display = 'none';
   document.getElementById('resolveDialog').style.display = 'none';
   window.currentResolution = null;
+  window.currentPhysicalResolution = null;
 }
 
-// UPDATED performVertexResolution with enhanced outgoing edge debugging
+// LOGICAL RESOLUTION EXECUTION
 function performVertexResolution() {
   if (!window.currentResolution) return;
 
@@ -381,7 +539,7 @@ function performVertexResolution() {
     return;
   }
 
-  console.log('=== VERTEX RESOLUTION DEBUG ===');
+  console.log('=== LOGICAL VERTEX RESOLUTION DEBUG ===');
   console.log('Original vertex:', vertex.id);
   console.log('Selected combinations:', selectedCombos.length);
   
@@ -396,6 +554,7 @@ function performVertexResolution() {
       id: newNodeId,
       originalId: vertex.id,
       pathDescription: combo.description,
+      resolutionType: 'logical',
       x: vertex.x,
       y: vertex.y,
       vx: 0,
@@ -412,138 +571,182 @@ function performVertexResolution() {
     newNodes.push(newNode);
   });
 
-  // Remove original vertex FIRST (before creating edges)
-  console.log('\n=== REMOVING ORIGINAL VERTEX ===');
-  const originalNodeCount = nodes.length;
+  // Remove original vertex and edges, add new nodes and edges
   nodes = nodes.filter(n => n.id !== vertex.id);
-  console.log(`Removed vertex ${vertex.id}`);
-
-  // Remove original edges SECOND
-  console.log('\n=== REMOVING ORIGINAL EDGES ===');
-  const originalLinksCount = links.length;
   links = links.filter(link => {
     const sourceId = (typeof link.source === 'object') ? link.source.id : link.source;
     const targetId = (typeof link.target === 'object') ? link.target.id : link.target;
-    const shouldRemove = sourceId === vertex.id || targetId === vertex.id;
-    if (shouldRemove) {
-      console.log(`Removing edge: ${sourceId} → ${targetId}`);
-    }
-    return !shouldRemove;
+    return sourceId !== vertex.id && targetId !== vertex.id;
   });
-  console.log(`Removed ${originalLinksCount - links.length} edges`);
 
-  // Add new nodes THIRD
-  console.log('\n=== ADDING NEW NODES ===');
   nodes.push(...newNodes);
-  newNodes.forEach(node => {
-    console.log(`Added node: ${node.id}`);
-  });
 
-  // Create and add new edges LAST - ENHANCED DEBUGGING
-  console.log('\n=== CREATING NEW EDGES ===');
+  // Create new edges
   const newLinks = [];
-
   selectedCombos.forEach((combo, index) => {
     const newNodeId = selectedCombos.length === 1 ? vertex.id : `${vertex.id}_${index + 1}`;
     
-    console.log(`\nProcessing combo ${index} for node ${newNodeId}:`);
-    console.log(`  Description: ${combo.description}`);
-    console.log(`  Combo object:`, combo);
-
-    // Create INCOMING edge
     if (combo.incoming) {
-      const sourceId = combo.incoming.sourceId;
-      
-      console.log(`  Processing incoming edge from ${sourceId}`);
-      
-      // Verify source node exists
-      const sourceNode = nodes.find(n => n.id === sourceId);
-      if (!sourceNode) {
-        console.error(`❌ Source node ${sourceId} not found for incoming edge!`);
-        console.log(`Available nodes:`, nodes.map(n => n.id));
-      } else {
-        const newIncomingLink = {
-          source: sourceId,
-          target: newNodeId,
-          srcOrientation: combo.incoming.link.srcOrientation,
-          tgtOrientation: combo.incoming.link.tgtOrientation,
-          gfaType: combo.incoming.link.gfaType,
-          overlap: combo.incoming.link.overlap
-        };
-        
-        newLinks.push(newIncomingLink);
-        console.log(`✓ Created incoming: ${sourceId} → ${newNodeId}`);
-      }
-    } else {
-      console.log(`⚠ No incoming edge for this combo`);
+      newLinks.push({
+        ...combo.incoming.link,
+        target: newNodeId,
+        source: combo.incoming.sourceId
+      });
     }
 
-    // Create OUTGOING edge - ENHANCED DEBUGGING
     if (combo.outgoing) {
-      const targetId = combo.outgoing.targetId;
-      
-      console.log(`  Processing outgoing edge to ${targetId}`);
-      
-      // Verify target node exists
-      const targetNode = nodes.find(n => n.id === targetId);
-      if (!targetNode) {
-        console.error(`❌ Target node ${targetId} not found for outgoing edge!`);
-        console.log(`Available nodes:`, nodes.map(n => n.id));
-      } else {
-        const newOutgoingLink = {
-          source: newNodeId,
-          target: targetId,
-          srcOrientation: combo.outgoing.link.srcOrientation,
-          tgtOrientation: combo.outgoing.link.tgtOrientation,
-          gfaType: combo.outgoing.link.gfaType,
-          overlap: combo.outgoing.link.overlap
-        };
-        
-        newLinks.push(newOutgoingLink);
-        console.log(`✓ Created outgoing: ${newNodeId} → ${targetId}`);
-      }
-    } else {
-      console.log(`❌ No outgoing edge for this combo - combo.outgoing is:`, combo.outgoing);
+      newLinks.push({
+        ...combo.outgoing.link,
+        source: newNodeId,
+        target: combo.outgoing.targetId
+      });
     }
   });
 
-  // Debug the edges we're about to add
-  debugEdgeCreation(newLinks, newNodes);
-
-  // Add new edges
-  console.log(`\n=== ADDING ${newLinks.length} NEW EDGES ===`);
   links.push(...newLinks);
-  
-  console.log(`Final graph: ${nodes.length} nodes, ${links.length} edges`);
 
-  // Clear selection and UI state
+  // Clear selection and update UI
   selected.nodes.clear();
   pinnedNodes.delete(vertex.id);
   updateResolveButton();
+  updatePhysicalResolveButton();
   hideResolveDialog();
 
   // Restart simulation
-  console.log('\n=== RESTARTING SIMULATION ===');
   startSimulation();
 
-  // Verify after simulation starts
-  setTimeout(() => {
-    console.log('\n=== POST-SIMULATION VERIFICATION ===');
-    newNodes.forEach(node => {
-      const nodeConnections = getVertexConnections(node.id);
-      console.log(`${node.id}: ${nodeConnections.incoming.length} incoming, ${nodeConnections.outgoing.length} outgoing`);
-      
-      // Show the actual connections for debugging
-      if (nodeConnections.incoming.length === 0) {
-        console.error(`❌ ${node.id} has NO incoming connections!`);
-      }
-      if (nodeConnections.outgoing.length === 0) {
-        console.error(`❌ ${node.id} has NO outgoing connections!`);
-      }
-    });
-  }, 100);
+  logEvent(`Logical vertex resolution complete: created ${newNodes.length} new vertices with ${newLinks.length} edges`);
+}
 
-  logEvent(`Vertex resolution complete: created ${newNodes.length} new vertices with ${newLinks.length} edges`);
+// PHYSICAL RESOLUTION EXECUTION
+function performPhysicalResolution() {
+  if (!window.currentPhysicalResolution) return;
+
+  const { vertex, combinations, connections } = window.currentPhysicalResolution;
+  const selectedCombos = [];
+
+  // Get selected combinations
+  document.querySelectorAll('#pathCombinations input[type="checkbox"]:checked').forEach(checkbox => {
+    const index = parseInt(checkbox.dataset.comboIndex);
+    selectedCombos.push(combinations[index]);
+  });
+
+  if (selectedCombos.length === 0) {
+    alert('Please select at least one physical path to keep.');
+    return;
+  }
+
+  console.log('=== PHYSICAL VERTEX RESOLUTION DEBUG ===');
+  console.log('Original vertex:', vertex.id);
+  console.log('Selected physical combinations:', selectedCombos.length);
+  
+  logEvent(`Physical resolving vertex ${vertex.id} into ${selectedCombos.length} copies`);
+
+  // Create new nodes first
+  const newNodes = [];
+  selectedCombos.forEach((combo, index) => {
+    const newNodeId = selectedCombos.length === 1 ? vertex.id : `${vertex.id}_p${index + 1}`;
+    const newNode = {
+      ...vertex,
+      id: newNodeId,
+      originalId: vertex.id,
+      pathDescription: combo.description,
+      resolutionType: 'physical',
+      x: vertex.x,
+      y: vertex.y,
+      vx: 0,
+      vy: 0
+    };
+    
+    if (selectedCombos.length > 1) {
+      const angleOffset = (index * 2 * Math.PI) / selectedCombos.length;
+      const radius = 60;
+      newNode.x = vertex.x + radius * Math.cos(angleOffset);
+      newNode.y = vertex.y + radius * Math.sin(angleOffset);
+    }
+
+    newNodes.push(newNode);
+  });
+
+  // Remove original vertex and edges
+  nodes = nodes.filter(n => n.id !== vertex.id);
+  links = links.filter(link => {
+    const sourceId = (typeof link.source === 'object') ? link.source.id : link.source;
+    const targetId = (typeof link.target === 'object') ? link.target.id : link.target;
+    return sourceId !== vertex.id && targetId !== vertex.id;
+  });
+
+  nodes.push(...newNodes);
+
+  // Create new edges based on physical connections
+  const newLinks = [];
+  selectedCombos.forEach((combo, index) => {
+    const newNodeId = selectedCombos.length === 1 ? vertex.id : `${vertex.id}_p${index + 1}`;
+    
+    // Create edge for RED subnode connection
+    if (combo.red) {
+      const originalLink = combo.red.link;
+      let newLink;
+      
+      if (combo.red.direction === 'incoming') {
+        newLink = {
+          ...originalLink,
+          target: newNodeId,
+          source: combo.red.sourceId
+        };
+      } else {
+        newLink = {
+          ...originalLink,
+          source: newNodeId,
+          target: combo.red.targetId
+        };
+      }
+      
+      if (typeof newLink.source === 'object') newLink.source = newLink.source.id;
+      if (typeof newLink.target === 'object') newLink.target = newLink.target.id;
+      
+      newLinks.push(newLink);
+    }
+
+    // Create edge for GREEN subnode connection
+    if (combo.green) {
+      const originalLink = combo.green.link;
+      let newLink;
+      
+      if (combo.green.direction === 'incoming') {
+        newLink = {
+          ...originalLink,
+          target: newNodeId,
+          source: combo.green.sourceId
+        };
+      } else {
+        newLink = {
+          ...originalLink,
+          source: newNodeId,
+          target: combo.green.targetId
+        };
+      }
+      
+      if (typeof newLink.source === 'object') newLink.source = newLink.source.id;
+      if (typeof newLink.target === 'object') newLink.target = newLink.target.id;
+      
+      newLinks.push(newLink);
+    }
+  });
+
+  links.push(...newLinks);
+
+  // Clear selection and update UI
+  selected.nodes.clear();
+  pinnedNodes.delete(vertex.id);
+  updateResolveButton();
+  updatePhysicalResolveButton();
+  hideResolveDialog();
+
+  // Restart simulation
+  startSimulation();
+
+  logEvent(`Physical vertex resolution complete: created ${newNodes.length} new vertices with ${newLinks.length} edges`);
 }
 
 function updateResolveButton() {
@@ -562,10 +765,33 @@ function updateResolveButton() {
       resolveBtn.disabled = false;
     } else {
       resolveBtn.textContent = 'Resolve Vertex';
-      resolveBtn.disabled = true; // Can't resolve vertex with 0-1 connections
+      resolveBtn.disabled = true;
     }
   } else {
     resolveBtn.textContent = 'Resolve Vertex';
+  }
+}
+
+function updatePhysicalResolveButton() {
+  const resolveBtn = document.getElementById('resolvePhysical');
+  const hasSelection = selected.nodes.size === 1;
+  
+  resolveBtn.disabled = !hasSelection;
+  
+  if (hasSelection) {
+    const vertexId = Array.from(selected.nodes)[0];
+    const connections = getPhysicalConnections(vertexId);
+    const totalConnections = connections.red.length + connections.green.length;
+    
+    if (totalConnections > 1) {
+      resolveBtn.textContent = `Resolve Physical (${connections.red.length}R+${connections.green.length}G)`;
+      resolveBtn.disabled = false;
+    } else {
+      resolveBtn.textContent = 'Resolve Physical';
+      resolveBtn.disabled = true;
+    }
+  } else {
+    resolveBtn.textContent = 'Resolve Physical';
   }
 }
 
@@ -678,8 +904,10 @@ function selectNode(evt) {
     }
 
     // Add resolution info
-    const connections = getVertexConnections(found.id);
-    infoHTML += `<br><em>Incoming: ${connections.incoming.length}, Outgoing: ${connections.outgoing.length}</em>`;
+    const logicalConnections = getVertexConnections(found.id);
+    const physicalConnections = getPhysicalConnections(found.id);
+    infoHTML += `<br><em>Logical: ${logicalConnections.incoming.length} in, ${logicalConnections.outgoing.length} out</em>`;
+    infoHTML += `<br><em>Physical: ${physicalConnections.red.length} red, ${physicalConnections.green.length} green</em>`;
     infoHTML += `<pre>${JSON.stringify(found,null,2)}</pre>`;
     
     document.getElementById('infoContent').innerHTML = infoHTML;
@@ -687,8 +915,9 @@ function selectNode(evt) {
     // DEBUG: Add pre-resolution debugging
     debugVertexConnections(found.id);
     
-    // Update resolve button state
+    // Update resolve button states
     updateResolveButton();
+    updatePhysicalResolveButton();
     
     drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
   }
@@ -745,7 +974,13 @@ canvas.addEventListener('pointerleave', endDrag);
 
 // Dialog event listeners
 document.getElementById('cancelResolve').addEventListener('click', hideResolveDialog);
-document.getElementById('confirmResolve').addEventListener('click', performVertexResolution);
+document.getElementById('confirmResolve').addEventListener('click', () => {
+  if (window.currentPhysicalResolution) {
+    performPhysicalResolution();
+  } else {
+    performVertexResolution();
+  }
+});
 document.getElementById('dialogOverlay').addEventListener('click', hideResolveDialog);
 
 setupUI({
@@ -758,6 +993,12 @@ setupUI({
     if (selected.nodes.size === 1) {
       const vertexId = Array.from(selected.nodes)[0];
       showResolveDialog(vertexId);
+    }
+  },
+  onResolvePhysical: () => {
+    if (selected.nodes.size === 1) {
+      const vertexId = Array.from(selected.nodes)[0];
+      showPhysicalResolveDialog(vertexId);
     }
   },
   onRedraw:      startSimulation,

@@ -1,4 +1,4 @@
-// ui.js - ENHANCED: Added resolve button handler
+// ui.js - ENHANCED: Added physical resolve button handler
 
 export function setupUI({
   canvas,
@@ -6,7 +6,8 @@ export function setupUI({
   onGenerate,
   onPin,
   onFlip,        // Existing flip handler
-  onResolve,     // NEW: resolve handler
+  onResolve,     // Existing logical resolve handler
+  onResolvePhysical, // NEW: physical resolve handler
   onRedraw,
   onHighlightPath,
   onClearPaths,
@@ -32,9 +33,14 @@ export function setupUI({
     document.getElementById('flipNode').onclick = onFlip;
   }
   
-  // NEW: Resolve button
+  // Logical resolve button
   if (document.getElementById('resolveVertex') && onResolve) {
     document.getElementById('resolveVertex').onclick = onResolve;
+  }
+  
+  // NEW: Physical resolve button
+  if (document.getElementById('resolvePhysical') && onResolvePhysical) {
+    document.getElementById('resolvePhysical').onclick = onResolvePhysical;
   }
   
   document.getElementById('redraw').onclick          = onRedraw;

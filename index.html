@@ -19,7 +19,14 @@
       <button id="resetView">Return to Default View</button>
       <button id="pinNode">Pin Selected Node</button>
       <button id="flipNode" style="display: none;">Flip Selected Node ↻</button>
-      <button id="resolveVertex" disabled>Resolve Vertex</button>
+      
+      <!-- VERTEX RESOLUTION SECTION -->
+      <div class="resolution-section">
+        <h4>Vertex Resolution</h4>
+        <button id="resolveVertex" disabled>Resolve Vertex</button>
+        <button id="resolvePhysical" disabled>Resolve Physical</button>
+      </div>
+      
       <button id="redraw">Redraw Layout</button>
       <div id="pathInput">
         <label for="pathSequence">Path Sequence:</label>
@@ -40,8 +47,9 @@
 
       <div id="resolveInstructions" style="display: none; margin-top: 15px; padding: 10px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; font-size: 12px;">
         <strong>Vertex Resolution:</strong><br>
+        • <strong>Resolve Vertex</strong> - Logical graph connections<br>
+        • <strong>Resolve Physical</strong> - Red/Green subnode connections<br>
         • <strong>Click</strong> to select a vertex<br>
-        • Use <strong>Resolve Vertex</strong> button<br>
         • Choose which paths to keep<br>
         • Creates new vertices for each path
       </div>
@@ -59,6 +67,9 @@
     <div id="dialogOverlay" style="display: none;"></div>
     <div id="resolveDialog" style="display: none;">
       <h3>Resolve Vertex</h3>
+      <div id="physicalModeIndicator" style="display: none; background: #e1f5fe; padding: 5px; margin-bottom: 10px; border-radius: 4px; font-weight: bold; color: #0277bd;">
+        🔄 Physical Resolution Mode - Based on Red/Green Subnode Connections
+      </div>
       <div id="vertexInfo" class="vertex-info"></div>
       <div id="pathCombinations"></div>
       <div class="stats" id="resolutionStats"></div>

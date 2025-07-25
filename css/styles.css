@@ -54,6 +54,60 @@ button, input { display: block; margin-bottom: 8px; width: 100%; }
 }
 canvas { display: block; }
 
+/* --- NEW: Resolution Section Styles --- */
+.resolution-section {
+  margin: 15px 0;
+  padding: 10px 0;
+  border-top: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+}
+
+.resolution-section h4 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #333;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 5px;
+}
+
+#resolveVertex {
+  background: #007bff;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 5px;
+}
+
+#resolveVertex:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+#resolveVertex:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+#resolvePhysical {
+  background: #28a745;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 5px;
+}
+
+#resolvePhysical:hover:not(:disabled) {
+  background: #1e7e34;
+}
+
+#resolvePhysical:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
 /* --- Vertex Resolution Dialog Styles --- */
 #resolveDialog {
   position: fixed;
@@ -90,6 +144,16 @@ canvas { display: block; }
   background: #e9f5ff;
 }
 
+/* NEW: Physical combination styling */
+.path-combination.physical-combination {
+  background: #f0f8ff;
+  border-color: #b3d9ff;
+}
+
+.path-combination.physical-combination:hover {
+  background: #e1f5fe;
+}
+
 .path-combination input[type="checkbox"] {
   margin-right: 10px;
   transform: scale(1.2);
@@ -119,6 +183,17 @@ canvas { display: block; }
 
 .outgoing-edge {
   color: #1a9850;
+  font-weight: bold;
+}
+
+/* NEW: Physical connection styling */
+.red-connection {
+  color: #dc3545;
+  font-weight: bold;
+}
+
+.green-connection {
+  color: #28a745;
   font-weight: bold;
 }
 
@@ -159,24 +234,6 @@ canvas { display: block; }
   height: 100%;
   background: rgba(0,0,0,0.5);
   z-index: 999;
-}
-
-#resolveVertex {
-  background: #007bff;
-  color: white;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-#resolveVertex:hover:not(:disabled) {
-  background: #0056b3;
-}
-
-#resolveVertex:disabled {
-  background: #6c757d;
-  cursor: not-allowed;
 }
 
 .vertex-info {
