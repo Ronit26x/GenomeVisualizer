@@ -1,9 +1,11 @@
-// main.js - COMPLETE: Enhanced with multi-path highlighting system
+// main.js - COMPLETE: Enhanced with multi-path highlighting system and path updates
 
 import { parseDot, parseGfa }       from './parser.js';
 import { createSimulation }         from './simulation.js';
 import { clearCanvas, drawGraph }   from './renderer.js';
 import { flipSelectedNode, getSubnodeAt } from './gfa-renderer.js';
+import { updatePathsAfterResolution, showPathUpdateSummary } from './path-updater.js';
+import { showPathUpdateDialog, markUpdatedPathsInUI, addPathUpdateStyles } from './path-update-ui.js';
 import { setupUI }                  from './ui.js';
 
 const canvas = document.getElementById('canvas');
@@ -55,6 +57,9 @@ function resizeCanvas() {
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
+
+// Initialize path update styles
+addPathUpdateStyles();
 
 d3.select(canvas).call(
   d3.zoom()
@@ -544,7 +549,7 @@ function hideResolveDialog() {
   window.currentPhysicalResolution = null;
 }
 
-// LOGICAL RESOLUTION EXECUTION
+// UPDATED: Logical resolution execution with path updates
 function performVertexResolution() {
   if (!window.currentResolution) return;
 
@@ -562,9 +567,12 @@ function performVertexResolution() {
     return;
   }
 
-  console.log('=== LOGICAL VERTEX RESOLUTION DEBUG ===');
+  console.log('=== LOGICAL VERTEX RESOLUTION WITH PATH UPDATES ===');
   console.log('Original vertex:', vertex.id);
   console.log('Selected combinations:', selectedCombos.length);
+  
+  // Store original paths before resolution
+  const originalPaths = [...savedPaths];
   
   logEvent(`Resolving vertex ${vertex.id} into ${selectedCombos.length} copies`);
 
@@ -628,11 +636,48 @@ function performVertexResolution() {
 
   links.push(...newLinks);
 
+  // UPDATE PATHS AFTER RESOLUTION
+  const resolutionData = {
+    originalVertex: vertex,
+    newVertices: newNodes,
+    resolutionType: 'logical'
+  };
+  
+  const updatedPaths = updatePathsAfterResolution(originalPaths, resolutionData);
+  
+  // Update global savedPaths
+  savedPaths.splice(0, savedPaths.length, ...updatedPaths);
+  
+  // Update current path index if needed
+  if (currentPathIndex >= 0 && currentPathIndex < savedPaths.length) {
+    const currentPath = savedPaths[currentPathIndex];
+    highlightedPath.nodes = new Set(currentPath.nodes);
+    highlightedPath.edges = new Set(currentPath.edges);
+    highlightedPath.currentColor = currentPath.color;
+  } else {
+    currentPathIndex = -1;
+    highlightedPath.nodes.clear();
+    highlightedPath.edges.clear();
+  }
+  
+  // Show summary of path updates
+  const summary = showPathUpdateSummary(originalPaths, updatedPaths, vertex.id);
+  logEvent(summary);
+
+  // Show detailed dialog if there were affected paths
+  const affectedPaths = originalPaths.filter(path => 
+    Array.from(path.nodes).includes(vertex.id)
+  );
+  if (affectedPaths.length > 0) {
+    showPathUpdateDialog(originalPaths, updatedPaths, vertex.id);
+  }
+
   // Clear selection and update UI
   selected.nodes.clear();
   pinnedNodes.delete(vertex.id);
   updateResolveButton();
   updatePhysicalResolveButton();
+  updatePathUI();
   hideResolveDialog();
 
   // Restart simulation
@@ -641,7 +686,7 @@ function performVertexResolution() {
   logEvent(`Logical vertex resolution complete: created ${newNodes.length} new vertices with ${newLinks.length} edges`);
 }
 
-// PHYSICAL RESOLUTION EXECUTION
+// UPDATED: Physical resolution execution with path updates
 function performPhysicalResolution() {
   if (!window.currentPhysicalResolution) return;
 
@@ -659,9 +704,12 @@ function performPhysicalResolution() {
     return;
   }
 
-  console.log('=== PHYSICAL VERTEX RESOLUTION DEBUG ===');
+  console.log('=== PHYSICAL VERTEX RESOLUTION WITH PATH UPDATES ===');
   console.log('Original vertex:', vertex.id);
   console.log('Selected physical combinations:', selectedCombos.length);
+  
+  // Store original paths before resolution
+  const originalPaths = [...savedPaths];
   
   logEvent(`Physical resolving vertex ${vertex.id} into ${selectedCombos.length} copies`);
 
@@ -759,11 +807,48 @@ function performPhysicalResolution() {
 
   links.push(...newLinks);
 
+  // UPDATE PATHS AFTER RESOLUTION
+  const resolutionData = {
+    originalVertex: vertex,
+    newVertices: newNodes,
+    resolutionType: 'physical'
+  };
+  
+  const updatedPaths = updatePathsAfterResolution(originalPaths, resolutionData);
+  
+  // Update global savedPaths
+  savedPaths.splice(0, savedPaths.length, ...updatedPaths);
+  
+  // Update current path index if needed
+  if (currentPathIndex >= 0 && currentPathIndex < savedPaths.length) {
+    const currentPath = savedPaths[currentPathIndex];
+    highlightedPath.nodes = new Set(currentPath.nodes);
+    highlightedPath.edges = new Set(currentPath.edges);
+    highlightedPath.currentColor = currentPath.color;
+  } else {
+    currentPathIndex = -1;
+    highlightedPath.nodes.clear();
+    highlightedPath.edges.clear();
+  }
+  
+  // Show summary of path updates
+  const summary = showPathUpdateSummary(originalPaths, updatedPaths, vertex.id);
+  logEvent(summary);
+
+  // Show detailed dialog if there were affected paths
+  const affectedPaths = originalPaths.filter(path => 
+    Array.from(path.nodes).includes(vertex.id)
+  );
+  if (affectedPaths.length > 0) {
+    showPathUpdateDialog(originalPaths, updatedPaths, vertex.id);
+  }
+
   // Clear selection and update UI
   selected.nodes.clear();
   pinnedNodes.delete(vertex.id);
   updateResolveButton();
   updatePhysicalResolveButton();
+  updatePathUI();
   hideResolveDialog();
 
   // Restart simulation
@@ -994,6 +1079,9 @@ function updatePathUI() {
   } else {
     currentPathDisplay.textContent = savedPaths.length > 0 ? `None selected (0/${savedPaths.length})` : 'No paths';
   }
+  
+  // Mark recently updated paths
+  markUpdatedPathsInUI(savedPaths);
 }
 
 function navigatePath(direction) {
