@@ -84,6 +84,10 @@ function startSimulation() {
     canvas.width, canvas.height,
     () => drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath)
   );
+
+  // ADD THESE LINES:
+  window.nodes = nodes;
+  window.links = links;
 }
 
 function parseGraph(text, name) {
@@ -108,6 +112,10 @@ function parseGraph(text, name) {
   nodes = parsed.nodes;
   links = parsed.links.filter(l=>nodeSet.has(l.source)&&nodeSet.has(l.target));
   startSimulation();
+
+  // ADD THESE LINES:
+  window.nodes = nodes;
+  window.links = links;
 }
 
 function generateRandom() {
@@ -121,6 +129,10 @@ function generateRandom() {
   nodes = d3.range(50).map(i=>({id:i}));
   links = d3.range(49).map(i=>({source:i,target:i+1}));
   startSimulation();
+
+  // ADD THESE LINES:
+  window.nodes = nodes;
+  window.links = links;
 }
 
 function pinSelected() {
@@ -636,6 +648,10 @@ function performVertexResolution() {
 
   links.push(...newLinks);
 
+  // Update global references for path updater
+  window.nodes = nodes;
+  window.links = links;
+
   // UPDATE PATHS AFTER RESOLUTION
   const resolutionData = {
     originalVertex: vertex,
@@ -806,6 +822,10 @@ function performPhysicalResolution() {
   });
 
   links.push(...newLinks);
+
+  // Update global references for path updater
+  window.nodes = nodes;
+  window.links = links;
 
   // UPDATE PATHS AFTER RESOLUTION
   const resolutionData = {

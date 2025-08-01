@@ -1,182 +1,226 @@
-// path-updater.js - System to update paths after vertex resolution
+// path-updater.js - FULL DEBUG: Show exactly what edges exist
 
 /**
  * Updates all saved paths after a vertex resolution operation
- * @param {Array} savedPaths - Array of saved path objects
- * @param {Object} resolutionData - Data about the resolution operation
- * @returns {Array} Updated paths array
  */
 export function updatePathsAfterResolution(savedPaths, resolutionData) {
   const { originalVertex, newVertices, resolutionType } = resolutionData;
   const updatedPaths = [];
   
-  console.log(`=== UPDATING PATHS AFTER ${resolutionType.toUpperCase()} RESOLUTION ===`);
-  console.log(`Original vertex: ${originalVertex.id}`);
+  console.log(`=== FULL DEBUG PATH UPDATE ===`);
+  console.log(`Original vertex: "${originalVertex.id}"`);
   console.log(`New vertices: ${newVertices.map(v => v.id).join(', ')}`);
   
+  // FIRST: Show the complete graph state
+  debugGraphState();
+  
   savedPaths.forEach((path, pathIndex) => {
-    const pathNodes = Array.from(path.nodes);
-    const coreIndex = pathNodes.indexOf(originalVertex.id);
+    const pathSequence = path.sequence.split(',').map(id => id.trim());
+    const resolvedIndex = pathSequence.findIndex(id => normalizeId(id) === normalizeId(originalVertex.id));
     
-    if (coreIndex === -1) {
-      // Path doesn't contain the resolved vertex, keep as-is
+    if (resolvedIndex === -1) {
       updatedPaths.push({ ...path });
-      console.log(`Path "${path.name}": No update needed (doesn't contain ${originalVertex.id})`);
       return;
     }
     
-    console.log(`Path "${path.name}": Contains ${originalVertex.id} at position ${coreIndex}`);
+    console.log(`\n=== DEBUGGING PATH "${path.name}" ===`);
+    console.log(`Original sequence: [${pathSequence.map(id => `"${id}"`).join(', ')}]`);
+    console.log(`Resolved vertex: "${originalVertex.id}" at index ${resolvedIndex}`);
     
-    // Determine the replacement vertex based on path flow
-    const replacement = findReplacementVertex(
-      pathNodes, 
-      coreIndex, 
-      newVertices, 
-      resolutionType
-    );
+    // Show what connections we need for this path
+    debugRequiredConnections(pathSequence, resolvedIndex);
     
-    if (!replacement) {
-      console.warn(`Path "${path.name}": Could not find suitable replacement, removing path`);
-      return; // Skip this path (remove it)
+    // Try each replacement vertex with full debugging
+    let foundReplacement = null;
+    
+    for (let i = 0; i < newVertices.length; i++) {
+      const newVertex = newVertices[i];
+      const testSequence = [...pathSequence];
+      testSequence[resolvedIndex] = newVertex.id;
+      
+      console.log(`\n--- TESTING REPLACEMENT ${i + 1}/${newVertices.length}: "${newVertex.id}" ---`);
+      console.log(`Test sequence: [${testSequence.map(id => `"${id}"`).join(', ')}]`);
+      
+      const isValid = debugPathValidation(testSequence);
+      
+      if (isValid) {
+        console.log(`✓ FOUND VALID REPLACEMENT: ${newVertex.id}`);
+        foundReplacement = newVertex;
+        break;
+      } else {
+        console.log(`✗ INVALID REPLACEMENT: ${newVertex.id}`);
+      }
     }
     
-    // Create updated path
-    const updatedSequence = [...pathNodes];
-    updatedSequence[coreIndex] = replacement.id;
-    
-    const updatedPath = {
-      ...path,
-      sequence: updatedSequence.join(','),
-      nodes: new Set(updatedSequence),
-      // Edges will be recalculated
-      edges: new Set(),
-      lastUpdated: new Date(),
-      updateReason: `Vertex ${originalVertex.id} resolved → ${replacement.id}`,
-      originalCoreVertex: originalVertex.id
-    };
-    
-    // Recalculate edges for the updated path
-    recalculatePathEdges(updatedPath, window.links);
-    
-    updatedPaths.push(updatedPath);
-    console.log(`Path "${path.name}": Updated ${originalVertex.id} → ${replacement.id}`);
+    if (foundReplacement) {
+      const updatedSequence = [...pathSequence];
+      updatedSequence[resolvedIndex] = foundReplacement.id;
+      
+      const updatedPath = {
+        ...path,
+        sequence: updatedSequence.join(','),
+        nodes: new Set(updatedSequence),
+        edges: new Set(),
+        lastUpdated: new Date(),
+        updateReason: `${originalVertex.id} → ${foundReplacement.id}`,
+        originalCoreVertex: originalVertex.id
+      };
+      
+      recalculatePathEdges(updatedPath);
+      updatedPaths.push(updatedPath);
+      
+      console.log(`✓ PATH SUCCESSFULLY UPDATED`);
+    } else {
+      console.log(`✗ NO VALID REPLACEMENT FOUND - PATH WILL BE REMOVED`);
+    }
   });
   
-  console.log(`Path update complete: ${savedPaths.length} → ${updatedPaths.length} paths`);
   return updatedPaths;
 }
 
 /**
- * Finds the appropriate replacement vertex based on path flow
+ * Show complete graph state for debugging
  */
-function findReplacementVertex(pathNodes, coreIndex, newVertices, resolutionType) {
-  const coreId = pathNodes[coreIndex];
-  const prevNodeId = coreIndex > 0 ? pathNodes[coreIndex - 1] : null;
-  const nextNodeId = coreIndex < pathNodes.length - 1 ? pathNodes[coreIndex + 1] : null;
+function debugGraphState() {
+  console.log(`\n=== GRAPH STATE DEBUG ===`);
   
-  console.log(`  Finding replacement for flow: ${prevNodeId || 'START'} → ${coreId} → ${nextNodeId || 'END'}`);
-  
-  if (resolutionType === 'logical') {
-    return findLogicalReplacement(prevNodeId, nextNodeId, newVertices);
-  } else if (resolutionType === 'physical') {
-    return findPhysicalReplacement(prevNodeId, nextNodeId, newVertices);
+  if (!window.nodes) {
+    console.log(`ERROR: No window.nodes available`);
+    return;
   }
   
-  return null;
-}
-
-/**
- * Find replacement for logical resolution (based on pathDescription)
- */
-function findLogicalReplacement(prevNodeId, nextNodeId, newVertices) {
-  // For logical resolution, match the path description pattern
-  const expectedPattern = `${prevNodeId || 'START'} → ${nextNodeId || 'END'}`;
-  
-  for (const vertex of newVertices) {
-    if (vertex.pathDescription === expectedPattern) {
-      console.log(`  Logical match found: ${vertex.id} (${vertex.pathDescription})`);
-      return vertex;
-    }
+  if (!window.links) {
+    console.log(`ERROR: No window.links available`);
+    return;
   }
   
-  // Fallback: try partial matches
-  for (const vertex of newVertices) {
-    const desc = vertex.pathDescription || '';
-    
-    // Check if the path flow matches what this vertex represents
-    if (prevNodeId && nextNodeId) {
-      // Middle of path - need exact match
-      if (desc.includes(prevNodeId) && desc.includes(nextNodeId)) {
-        console.log(`  Logical partial match: ${vertex.id} (${desc})`);
-        return vertex;
-      }
-    } else if (prevNodeId && !nextNodeId) {
-      // End of path - need incoming match
-      if (desc.includes(prevNodeId) && desc.includes('End')) {
-        console.log(`  Logical end match: ${vertex.id} (${desc})`);
-        return vertex;
-      }
-    } else if (!prevNodeId && nextNodeId) {
-      // Start of path - need outgoing match
-      if (desc.includes('Start') && desc.includes(nextNodeId)) {
-        console.log(`  Logical start match: ${vertex.id} (${desc})`);
-        return vertex;
-      }
-    }
-  }
+  console.log(`Total nodes: ${window.nodes.length}`);
+  console.log(`Total links: ${window.links.length}`);
   
-  console.log(`  No logical match found for ${prevNodeId || 'START'} → ${nextNodeId || 'END'}`);
-  return newVertices[0]; // Fallback to first vertex
-}
-
-/**
- * Find replacement for physical resolution (based on actual edge connections)
- */
-function findPhysicalReplacement(prevNodeId, nextNodeId, newVertices) {
-  // For physical resolution, check actual edge connections
-  for (const vertex of newVertices) {
-    const hasIncomingFromPrev = prevNodeId ? 
-      hasDirectEdge(prevNodeId, vertex.id, window.links) : true;
-    const hasOutgoingToNext = nextNodeId ? 
-      hasDirectEdge(vertex.id, nextNodeId, window.links) : true;
-    
-    if (hasIncomingFromPrev && hasOutgoingToNext) {
-      console.log(`  Physical match found: ${vertex.id} (edges: ${prevNodeId || 'START'} → ${vertex.id} → ${nextNodeId || 'END'})`);
-      return vertex;
-    }
-  }
-  
-  console.log(`  No physical match found for ${prevNodeId || 'START'} → ${nextNodeId || 'END'}`);
-  return newVertices[0]; // Fallback to first vertex
-}
-
-/**
- * Check if there's a direct edge between two vertices
- */
-function hasDirectEdge(sourceId, targetId, links) {
-  return links.some(link => {
-    const linkSourceId = String(link.source.id || link.source);
-    const linkTargetId = String(link.target.id || link.target);
-    return (linkSourceId === sourceId && linkTargetId === targetId) ||
-           (linkSourceId === targetId && linkTargetId === sourceId);
+  // Show all nodes
+  console.log(`\nAll nodes in graph:`);
+  window.nodes.forEach((node, i) => {
+    console.log(`  ${i}: "${node.id}" (type: ${typeof node.id})`);
   });
+  
+  // Show all links
+  console.log(`\nAll links in graph:`);
+  window.links.forEach((link, i) => {
+    const sourceId = link.source.id || link.source;
+    const targetId = link.target.id || link.target;
+    console.log(`  ${i}: "${sourceId}" → "${targetId}" (types: ${typeof sourceId}, ${typeof targetId})`);
+  });
+}
+
+/**
+ * Debug what connections are required for this path
+ */
+function debugRequiredConnections(pathSequence, resolvedIndex) {
+  console.log(`\nRequired connections for path validation:`);
+  
+  for (let i = 0; i < pathSequence.length - 1; i++) {
+    const nodeA = pathSequence[i];
+    const nodeB = pathSequence[i + 1];
+    
+    if (i === resolvedIndex - 1) {
+      console.log(`  ${i}: "${nodeA}" → [RESOLVED_VERTEX] (connection FROM previous)`);
+    } else if (i === resolvedIndex) {
+      console.log(`  ${i}: [RESOLVED_VERTEX] → "${nodeB}" (connection TO next)`);
+    } else {
+      console.log(`  ${i}: "${nodeA}" → "${nodeB}" (normal connection)`);
+    }
+  }
+}
+
+/**
+ * Debug path validation with detailed edge checking
+ */
+function debugPathValidation(testSequence) {
+  console.log(`Validating path: [${testSequence.map(id => `"${id}"`).join(', ')}]`);
+  
+  if (testSequence.length < 2) {
+    console.log(`Single node path - automatically valid`);
+    return true;
+  }
+  
+  // Check each consecutive pair
+  for (let i = 0; i < testSequence.length - 1; i++) {
+    const nodeA = normalizeId(testSequence[i]);
+    const nodeB = normalizeId(testSequence[i + 1]);
+    
+    console.log(`\n  Checking connection ${i}: "${nodeA}" → "${nodeB}"`);
+    
+    // Find all edges involving these nodes
+    const relevantEdges = findRelevantEdges(nodeA, nodeB);
+    
+    if (relevantEdges.length === 0) {
+      console.log(`    ✗ NO EDGES FOUND between these nodes`);
+      return false;
+    } else {
+      console.log(`    ✓ Found ${relevantEdges.length} relevant edge(s):`);
+      relevantEdges.forEach((edge, idx) => {
+        console.log(`      ${idx + 1}. Index ${edge.index}: "${edge.source}" → "${edge.target}"`);
+      });
+    }
+  }
+  
+  console.log(`  ✓ All connections verified`);
+  return true;
+}
+
+/**
+ * Find all edges that could connect two nodes
+ */
+function findRelevantEdges(nodeA, nodeB) {
+  if (!window.links) return [];
+  
+  const normalizedA = normalizeId(nodeA);
+  const normalizedB = normalizeId(nodeB);
+  
+  const relevantEdges = [];
+  
+  window.links.forEach((link, index) => {
+    const linkSourceId = normalizeId(link.source.id || link.source);
+    const linkTargetId = normalizeId(link.target.id || link.target);
+    
+    // Check both directions
+    if ((linkSourceId === normalizedA && linkTargetId === normalizedB) ||
+        (linkSourceId === normalizedB && linkTargetId === normalizedA)) {
+      relevantEdges.push({
+        index: index,
+        source: linkSourceId,
+        target: linkTargetId,
+        direction: linkSourceId === normalizedA ? 'forward' : 'reverse'
+      });
+    }
+  });
+  
+  return relevantEdges;
+}
+
+/**
+ * Normalize node IDs for consistent comparison
+ */
+function normalizeId(id) {
+  return String(id).trim();
 }
 
 /**
  * Recalculate edges for an updated path
  */
-function recalculatePathEdges(updatedPath, links) {
-  const nodeIds = updatedPath.sequence.split(',').map(id => id.trim());
+function recalculatePathEdges(updatedPath) {
+  if (!window.links) return;
+  
+  const nodeIds = updatedPath.sequence.split(',').map(id => normalizeId(id.trim()));
   const pathEdges = new Set();
   
-  // Find edges between consecutive nodes
   for (let i = 0; i < nodeIds.length - 1; i++) {
     const sourceId = nodeIds[i];
     const targetId = nodeIds[i + 1];
     
-    links.forEach((link, index) => {
-      const linkSourceId = String(link.source.id || link.source);
-      const linkTargetId = String(link.target.id || link.target);
+    window.links.forEach((link, index) => {
+      const linkSourceId = normalizeId(link.source.id || link.source);
+      const linkTargetId = normalizeId(link.target.id || link.target);
       
       if ((linkSourceId === sourceId && linkTargetId === targetId) ||
           (linkSourceId === targetId && linkTargetId === sourceId)) {
@@ -186,37 +230,32 @@ function recalculatePathEdges(updatedPath, links) {
   }
   
   updatedPath.edges = pathEdges;
-  console.log(`  Recalculated ${pathEdges.size} edges for updated path`);
+  console.log(`Recalculated ${pathEdges.size} edges`);
 }
 
 /**
  * Show a summary of path updates to the user
  */
 export function showPathUpdateSummary(originalPaths, updatedPaths, originalVertexId) {
-  const affectedPaths = originalPaths.filter(path => 
-    Array.from(path.nodes).includes(originalVertexId)
-  );
+  const affectedPaths = originalPaths.filter(path => {
+    const pathNodes = path.sequence.split(',').map(id => normalizeId(id.trim()));
+    return pathNodes.includes(normalizeId(originalVertexId));
+  });
   
-  const removedCount = affectedPaths.length - updatedPaths.filter(path => 
+  const updatedCount = updatedPaths.filter(path => 
     path.originalCoreVertex === originalVertexId
   ).length;
+  
+  const removedCount = affectedPaths.length - updatedCount;
   
   const message = [
     `Path Update Summary:`,
     `• ${affectedPaths.length} paths contained vertex ${originalVertexId}`,
-    `• ${affectedPaths.length - removedCount} paths successfully updated`,
+    `• ${updatedCount} paths successfully updated`,
     removedCount > 0 ? `• ${removedCount} paths removed (no valid replacement found)` : null,
     `• ${originalPaths.length - affectedPaths.length} paths unaffected`
   ].filter(Boolean).join('\n');
   
   console.log(message);
-  
-  // Log details of each updated path
-  updatedPaths.forEach(path => {
-    if (path.originalCoreVertex === originalVertexId) {
-      console.log(`  Updated: "${path.name}" - ${path.updateReason}`);
-    }
-  });
-  
   return message;
 }
