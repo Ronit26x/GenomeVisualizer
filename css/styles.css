@@ -511,3 +511,25 @@ canvas { display: block; }
 #savedPathsList::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
 }
+
+.export-btn {
+  background: #17a2b8;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+  margin-bottom: 0;
+  width: auto;
+  margin-left: 5px;
+}
+
+.export-btn:hover:not(:disabled) {
+  background: #138496;
+}
+
+.export-btn:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}

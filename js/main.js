@@ -1,5 +1,6 @@
 // main.js - COMPLETE: Enhanced with multi-path highlighting system and path updates
 
+
 import { parseDot, parseGfa }       from './parser.js';
 import { createSimulation }         from './simulation.js';
 import { clearCanvas, drawGraph }   from './renderer.js';
@@ -7,6 +8,7 @@ import { flipSelectedNode, getSubnodeAt } from './gfa-renderer.js';
 import { updatePathsAfterResolution, showPathUpdateSummary } from './path-updater.js';
 import { showPathUpdateDialog, markUpdatedPathsInUI, addPathUpdateStyles } from './path-update-ui.js';
 import { setupUI }                  from './ui.js';
+import { exportPathSequence, addExportButton } from './sequence-exporter.js';
 
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
@@ -18,6 +20,7 @@ const pinnedNodes = new Set();
 const highlightedPath = { nodes: new Set(), edges: new Set(), currentColor: '#ff6b6b' }; // Track highlighted path with color
 
 // NEW: Multi-path management state
+let exportButton = null;
 let savedPaths = []; // Array of saved path objects
 let currentPathIndex = -1; // Index of currently displayed path (-1 = none)
 let nextPathId = 1; // Counter for generating unique path IDs
@@ -1004,7 +1007,7 @@ function showPath(index) {
     logEvent(`Showing path "${path.name}": ${path.sequence}`);
   }
   
-  updatePathUI();
+  updatePathUI(); // This will now handle export button state
   drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
 
@@ -1045,6 +1048,24 @@ function updatePathUI() {
   const pathList = document.getElementById('savedPathsList');
   const pathNav = document.getElementById('pathNavigation');
   const pathCounter = document.getElementById('pathCounter');
+  
+  // Create export button if it doesn't exist
+  if (!exportButton) {
+    exportButton = addExportButton();
+    if (exportButton) {
+      exportButton.addEventListener('click', () => {
+        if (currentPathIndex >= 0 && currentPathIndex < savedPaths.length) {
+          const currentPath = savedPaths[currentPathIndex];
+          exportPathSequence(currentPath, nodes, links);
+        }
+      });
+    }
+  }
+  
+  // Enable/disable export button based on current selection
+  if (exportButton) {
+    exportButton.disabled = currentPathIndex < 0 || savedPaths.length === 0;
+  }
   
   // Update path list
   pathList.innerHTML = '';
