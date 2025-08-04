@@ -71,22 +71,23 @@
         <!-- Path Navigation -->
         <div id="pathNavigation" style="display: none;">
           <div class="nav-header">
-            <span id="pathCounter">0 paths saved</span>
-            <button id="exportAllPaths" class="export-paths-btn" disabled>Export All</button>
-            <button id="clearAllPaths" class="clear-all-btn">Clear All</button>
-          </div>
-          
-          <div class="nav-controls">
-            <button id="prevPath" class="nav-btn">‹ Prev</button>
-            <div id="currentPathDisplay">No paths</div>
-            <button id="nextPath" class="nav-btn">Next ›</button>
-          </div>
-          
-          <div class="keyboard-shortcuts">
-            <small>
-              <strong>Ctrl+←/→:</strong> Navigate &nbsp;
-              <strong>Esc:</strong> Clear highlights
-            </small>
+            <!-- Path counter on its own line -->
+            <div class="nav-header-top">
+              <span id="pathCounter">0 paths saved</span>
+              <!-- Action buttons below counter -->
+              <div class="nav-header-actions">
+                <button id="exportAllPaths" class="export-paths-btn" disabled>Export All</button>
+                <button id="clearAllPaths" class="clear-all-btn">Clear All</button>
+                <button id="exportPathSequence" class="export-btn" disabled>Export Sequence</button>
+              </div>
+            </div>
+            
+            <!-- Bottom row: navigation controls -->
+            <div class="nav-controls">
+              <button id="prevPath" class="nav-btn">‹ Prev</button>
+              <div id="currentPathDisplay">No paths</div>
+              <button id="nextPath" class="nav-btn">Next ›</button>
+            </div>
           </div>
         </div>
         

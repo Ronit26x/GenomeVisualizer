@@ -1,4 +1,4 @@
-/* Enhanced styles.css with path management styling */
+/* Enhanced styles.css with improved path management layout */
 
 /* --- Global layout --- */
 body, html {
@@ -96,7 +96,7 @@ canvas { display: block; }
   cursor: not-allowed;
 }
 
-/* --- NEW: Path Management Styles --- */
+/* --- UPDATED: Path Management Styles --- */
 #pathManagement {
   margin: 15px 0;
   padding: 10px 0;
@@ -173,59 +173,108 @@ canvas { display: block; }
   text-align: center;
 }
 
-/* Path Navigation */
+/* UPDATED: Navigation Layout */
 .nav-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
-#pathCounter {
-  font-size: 12px;
-  font-weight: bold;
-  color: #333;
+/* Path counter on its own line */
+.nav-header-top {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nav-header-actions {
+  display: flex;
+  gap: 3px;
+  /* Remove justify-content: center to align with paths below */
+}
+
+/* Update button sizing for better layout */
+.nav-header-actions button {
+  font-size: 9px;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-bottom: 0;
+  width: auto;
+  white-space: nowrap;
+  flex: 1; /* Make buttons equal width */
+  min-width: 0; /* Allow buttons to shrink */
+}
+
+/* Specific button styles */
+.export-paths-btn {
+  background: #6f42c1;
+  color: white;
+}
+
+.export-paths-btn:hover:not(:disabled) {
+  background: #5a32a3;
 }
 
 .clear-all-btn {
   background: #dc3545;
   color: white;
-  border: none;
-  padding: 4px 8px;
-  border-radius: 3px;
-  font-size: 10px;
-  cursor: pointer;
-  margin-bottom: 0;
-  width: auto;
 }
 
-.clear-all-btn:hover {
+.clear-all-btn:hover:not(:disabled) {
   background: #c82333;
 }
 
-.clear-all-btn:disabled {
-  background: #6c757d;
-  cursor: not-allowed;
+.export-btn {
+  background: #17a2b8;
+  color: white;
 }
 
+.export-btn:hover:not(:disabled) {
+  background: #138496;
+}
+
+/* Disabled state for all action buttons */
+.nav-header-actions button:disabled {
+  background: #6c757d !important;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Path counter styling - centered above buttons */
+#pathCounter {
+  font-size: 12px;
+  font-weight: bold;
+  color: #333;
+  text-align: center;
+  padding: 4px 0;
+}
+
+/* Bottom row: navigation controls */
 .nav-controls {
   display: flex;
   align-items: center;
-  margin-bottom: 10px;
-  gap: 5px;
+  gap: 3px;
+  /* Remove justify-content: center and padding to align with paths */
+  background: #f8f9fa;
+  border-radius: 4px;
+  border: 1px solid #dee2e6;
+  padding: 6px 3px; /* Reduce padding */
 }
 
 .nav-btn {
   background: #6c757d;
   color: white;
   border: none;
-  padding: 5px 10px;
+  padding: 5px 8px;
   border-radius: 3px;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   margin-bottom: 0;
   width: auto;
-  flex-shrink: 0;
+  /* Remove flex-shrink: 0 to allow buttons to align properly */
 }
 
 .nav-btn:hover:not(:disabled) {
@@ -240,20 +289,26 @@ canvas { display: block; }
 #currentPathDisplay {
   flex: 1;
   text-align: center;
-  font-size: 11px;
+  font-size: 10px;
   color: #333;
-  background: #f8f9fa;
+  background: white;
   padding: 5px 8px;
   border-radius: 3px;
   border: 1px solid #dee2e6;
-  margin: 0 5px;
+  margin: 0 2px; /* Reduce margin to align with path cards */
+  font-weight: 500;
+  min-width: 0; /* Allow text to wrap/truncate */
 }
 
+/* Keyboard shortcuts - move to bottom */
 .keyboard-shortcuts {
   font-size: 10px;
   color: #666;
   text-align: center;
-  margin-top: 5px;
+  margin-top: 8px;
+  padding: 4px;
+  background: #f8f9fa;
+  border-radius: 3px;
 }
 
 /* Saved Paths List */
@@ -512,24 +567,48 @@ canvas { display: block; }
   background: #a8a8a8;
 }
 
-.export-btn {
+/* Import file section */
+.import-file-section {
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f8f9fa;
+}
+
+.import-file-section label {
+  font-weight: bold;
+  font-size: 12px;
+  margin-bottom: 5px;
+  display: block;
+}
+
+.import-file-section input[type="file"] {
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.import-btn {
   background: #17a2b8;
   color: white;
   border: none;
-  padding: 4px 8px;
+  padding: 6px 12px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
-  margin-bottom: 0;
-  width: auto;
-  margin-left: 5px;
+  width: 100%;
 }
 
-.export-btn:hover:not(:disabled) {
+.import-btn:hover {
   background: #138496;
 }
 
-.export-btn:disabled {
+.import-btn:disabled {
   background: #6c757d;
   cursor: not-allowed;
+}
+
+.import-help {
+  font-size: 10px;
+  color: #666;
 }
