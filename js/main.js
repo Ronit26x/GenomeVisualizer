@@ -1,5 +1,6 @@
 // main.js - COMPLETE: Enhanced with multi-path highlighting system and path updates
 
+import { exportAllPathsToFile, showExportPreviewDialog, addExportStyles } from './path-exporter.js';
 import { importPathsFromText, showImportResultsDialog, addImportStyles } from './path-importer.js';
 import { parseDot, parseGfa }       from './parser.js';
 import { createSimulation }         from './simulation.js';
@@ -1107,10 +1108,16 @@ function updatePathUI() {
   const prevBtn = document.getElementById('prevPath');
   const nextBtn = document.getElementById('nextPath');
   const clearBtn = document.getElementById('clearAllPaths');
+  const exportAllBtn = document.getElementById('exportAllPaths');
   
   prevBtn.disabled = savedPaths.length === 0;
   nextBtn.disabled = savedPaths.length === 0;
   clearBtn.disabled = savedPaths.length === 0;
+  
+  // Enable/disable export all button
+  if (exportAllBtn) {
+    exportAllBtn.disabled = savedPaths.length === 0;
+  }
   
   // Update current path display in navigation
   const currentPathDisplay = document.getElementById('currentPathDisplay');
@@ -1395,6 +1402,52 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
+
+// Initialize export styles
+addExportStyles();
+
+// Path export functionality
+const exportAllPathsBtn = document.getElementById('exportAllPaths');
+
+if (exportAllPathsBtn) {
+  exportAllPathsBtn.addEventListener('click', () => {
+    if (!savedPaths || savedPaths.length === 0) {
+      alert('No paths to export');
+      return;
+    }
+
+    // Show preview dialog before export
+    showExportPreviewDialog(savedPaths, () => {
+      try {
+        const result = exportAllPathsToFile(savedPaths);
+        logEvent(`Exported ${result.pathCount} paths to ${result.filename}`);
+        
+        // Show success message
+        setTimeout(() => {
+          alert(`Successfully exported ${result.pathCount} paths to ${result.filename}`);
+        }, 100);
+        
+      } catch (error) {
+        console.error('Error exporting paths:', error);
+        alert(`Error exporting paths: ${error.message}`);
+        logEvent(`Export error: ${error.message}`);
+      }
+    });
+  });
+}
+
+// Add keyboard shortcut for export (Ctrl+E)
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  
+  if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+    e.preventDefault();
+    if (exportAllPathsBtn && !exportAllPathsBtn.disabled) {
+      exportAllPathsBtn.click();
+    }
+  }
+});
+
 
 // Make functions globally available for UI
 window.deletePath = deletePath;
