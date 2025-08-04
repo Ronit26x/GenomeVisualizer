@@ -1045,28 +1045,12 @@ function clearAllPaths() {
   drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
 
+// FIXED: Enhanced updatePathUI function with proper export button handling
+// FIXED: Enhanced updatePathUI function with event delegation
 function updatePathUI() {
   const pathList = document.getElementById('savedPathsList');
   const pathNav = document.getElementById('pathNavigation');
   const pathCounter = document.getElementById('pathCounter');
-  
-  // Create export button if it doesn't exist
-  if (!exportButton) {
-    exportButton = addExportButton();
-    if (exportButton) {
-      exportButton.addEventListener('click', () => {
-        if (currentPathIndex >= 0 && currentPathIndex < savedPaths.length) {
-          const currentPath = savedPaths[currentPathIndex];
-          exportPathSequence(currentPath, nodes, links);
-        }
-      });
-    }
-  }
-  
-  // Enable/disable export button based on current selection
-  if (exportButton) {
-    exportButton.disabled = currentPathIndex < 0 || savedPaths.length === 0;
-  }
   
   // Update path list
   pathList.innerHTML = '';
@@ -1093,10 +1077,9 @@ function updatePathUI() {
         <div class="path-stats">${path.nodes.size} nodes, ${path.edges.size} edges</div>
       `;
       
-      // Click to show path
       pathDiv.addEventListener('click', (e) => {
         if (!e.target.classList.contains('delete-path')) {
-          showPath(index === currentPathIndex ? -1 : index); // Toggle if clicking current
+          showPath(index === currentPathIndex ? -1 : index);
         }
       });
       
@@ -1109,28 +1092,94 @@ function updatePathUI() {
   const nextBtn = document.getElementById('nextPath');
   const clearBtn = document.getElementById('clearAllPaths');
   const exportAllBtn = document.getElementById('exportAllPaths');
+  const exportBtn = document.getElementById('exportPathSequence');
   
-  prevBtn.disabled = savedPaths.length === 0;
-  nextBtn.disabled = savedPaths.length === 0;
-  clearBtn.disabled = savedPaths.length === 0;
+  if (prevBtn) prevBtn.disabled = savedPaths.length === 0;
+  if (nextBtn) nextBtn.disabled = savedPaths.length === 0;
+  if (clearBtn) clearBtn.disabled = savedPaths.length === 0;
   
-  // Enable/disable export all button
   if (exportAllBtn) {
     exportAllBtn.disabled = savedPaths.length === 0;
   }
   
-  // Update current path display in navigation
-  const currentPathDisplay = document.getElementById('currentPathDisplay');
-  if (currentPathIndex >= 0) {
-    const currentPath = savedPaths[currentPathIndex];
-    currentPathDisplay.textContent = `${currentPath.name} (${currentPathIndex + 1}/${savedPaths.length})`;
-  } else {
-    currentPathDisplay.textContent = savedPaths.length > 0 ? `None selected (0/${savedPaths.length})` : 'No paths';
+  // FIXED: Properly handle export sequence button
+  if (exportBtn) {
+    const hasValidSelection = currentPathIndex >= 0 && 
+                             currentPathIndex < savedPaths.length && 
+                             savedPaths.length > 0;
+    
+    exportBtn.disabled = !hasValidSelection;
+    
+    // Remove any existing event listeners and add a fresh one
+    exportBtn.onclick = null;
+    exportBtn.onclick = () => {
+      console.log('=== EXPORT SEQUENCE BUTTON CLICKED ===');
+      console.log('currentPathIndex:', currentPathIndex);
+      console.log('savedPaths.length:', savedPaths.length);
+      
+      if (currentPathIndex >= 0 && currentPathIndex < savedPaths.length) {
+        const currentPath = savedPaths[currentPathIndex];
+        console.log('Exporting path:', currentPath);
+        
+        if (!nodes || !links) {
+          alert('Error: Graph data not available');
+          return;
+        }
+        
+        try {
+          exportPathSequence(currentPath, nodes, links);
+          logEvent(`Exported sequence for path "${currentPath.name}"`);
+        } catch (error) {
+          console.error('Export error:', error);
+          alert(`Export failed: ${error.message}`);
+        }
+      } else {
+        alert('No path selected for export');
+      }
+    };
   }
   
-  // Mark recently updated paths
+  const currentPathDisplay = document.getElementById('currentPathDisplay');
+  if (currentPathDisplay) {
+    if (currentPathIndex >= 0 && currentPathIndex < savedPaths.length) {
+      const currentPath = savedPaths[currentPathIndex];
+      currentPathDisplay.textContent = `${currentPath.name} (${currentPathIndex + 1}/${savedPaths.length})`;
+    } else {
+      currentPathDisplay.textContent = savedPaths.length > 0 ? `None selected (0/${savedPaths.length})` : 'No paths';
+    }
+  }
+  
   markUpdatedPathsInUI(savedPaths);
 }
+
+// Simplified createExportButton function
+// function createExportButton() {
+//   console.log('Creating export button...');
+  
+//   let existingButton = document.getElementById('exportPathSequence');
+//   if (existingButton) {
+//     console.log('Export button already exists');
+//     return existingButton;
+//   }
+  
+//   const navActions = document.querySelector('.nav-header-actions');
+//   if (navActions) {
+//     const exportBtn = document.createElement('button');
+//     exportBtn.id = 'exportPathSequence';
+//     exportBtn.className = 'export-btn';
+//     exportBtn.textContent = 'Export Sequence';
+//     exportBtn.title = 'Download sequence file for selected path';
+//     exportBtn.disabled = true;
+    
+//     navActions.appendChild(exportBtn);
+//     console.log('Export button created and added to nav-header-actions');
+    
+//     return exportBtn;
+//   } else {
+//     console.error('Could not find nav-header-actions container');
+//     return null;
+//   }
+// }
 
 function navigatePath(direction) {
   if (savedPaths.length === 0) return;
@@ -1448,11 +1497,28 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// FIXED: Force create export button after page load
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM loaded, ensuring export button exists...');
+  setTimeout(() => {
+    if (!exportButton) {
+      exportButton = createExportButton();
+      console.log('Export button created on DOM load');
+    }
+  }, 100);
+});
 
 // Make functions globally available for UI
 window.deletePath = deletePath;
 window.showPath = showPath;
 window.navigatePath = navigatePath;
+
+// FIXED: Make export function and current variables globally available
+window.exportPathSequence = exportPathSequence;
+window.getCurrentPathIndex = () => currentPathIndex;
+window.getSavedPaths = () => savedPaths;
+window.getNodes = () => nodes;
+window.getLinks = () => links;
 
 // Make global references available for renderer
 window.highlightedPath = highlightedPath;
@@ -1465,6 +1531,3 @@ window.pinnedNodes = pinnedNodes;
 window.selected = selected;
 window.currentFormat = currentFormat;
 window.drawGraph = drawGraph;
-
-// initial render
-startSimulation();

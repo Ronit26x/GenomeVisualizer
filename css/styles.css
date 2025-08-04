@@ -191,7 +191,6 @@ canvas { display: block; }
 .nav-header-actions {
   display: flex;
   gap: 3px;
-  /* Remove justify-content: center to align with paths below */
 }
 
 /* Update button sizing for better layout */
@@ -204,10 +203,9 @@ canvas { display: block; }
   margin-bottom: 0;
   width: auto;
   white-space: nowrap;
-  flex: 1; /* Make buttons equal width */
-  min-width: 0; /* Allow buttons to shrink */
+  flex: 1;
+  min-width: 0;
 }
-
 /* Specific button styles */
 .export-paths-btn {
   background: #6f42c1;
@@ -218,6 +216,16 @@ canvas { display: block; }
   background: #5a32a3;
 }
 
+.export-btn {
+  background: #17a2b8;
+  color: white;
+}
+
+.export-btn:hover:not(:disabled) {
+  background: #138496;
+}
+
+
 .clear-all-btn {
   background: #dc3545;
   color: white;
@@ -227,14 +235,6 @@ canvas { display: block; }
   background: #c82333;
 }
 
-.export-btn {
-  background: #17a2b8;
-  color: white;
-}
-
-.export-btn:hover:not(:disabled) {
-  background: #138496;
-}
 
 /* Disabled state for all action buttons */
 .nav-header-actions button:disabled {
