@@ -54,6 +54,20 @@
           </div>
         </div>
         
+        <!-- NEW: Path Import Section -->
+        <div class="import-file-section">
+          <label for="pathFileInput">Import Paths from File:</label>
+          <input type="file" id="pathFileInput" accept=".txt,.paths" />
+          <button id="importPaths" class="import-btn" disabled>Import Paths</button>
+          
+          <div class="import-help" style="margin-top: 8px;">
+            <small>
+              <strong>Format:</strong> node1, node2, node3 /Path Name<br>
+              <strong>Example:</strong> -352234.21, 312819.10 /Assembly Path 1
+            </small>
+          </div>
+        </div>
+        
         <!-- Path Navigation -->
         <div id="pathNavigation" style="display: none;">
           <div class="nav-header">

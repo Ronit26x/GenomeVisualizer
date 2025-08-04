@@ -1,6 +1,6 @@
 // main.js - COMPLETE: Enhanced with multi-path highlighting system and path updates
 
-
+import { importPathsFromText, showImportResultsDialog, addImportStyles } from './path-importer.js';
 import { parseDot, parseGfa }       from './parser.js';
 import { createSimulation }         from './simulation.js';
 import { clearCanvas, drawGraph }   from './renderer.js';
@@ -1298,6 +1298,102 @@ setupUI({
   onRemoveNodes: removeSelected,
   onUndo: undo,
   onSelectNode: selectNode
+});
+
+addImportStyles();
+
+// Path import functionality
+let selectedPathFile = null;
+
+const pathFileInput = document.getElementById('pathFileInput');
+const importPathsBtn = document.getElementById('importPaths');
+
+if (pathFileInput && importPathsBtn) {
+  // Handle file selection
+  pathFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      selectedPathFile = file;
+      importPathsBtn.disabled = false;
+      importPathsBtn.textContent = `Import ${file.name}`;
+      logEvent(`Path file selected: ${file.name} (${file.size} bytes)`);
+    } else {
+      selectedPathFile = null;
+      importPathsBtn.disabled = true;
+      importPathsBtn.textContent = 'Import Paths';
+    }
+  });
+
+  // Handle import button click
+  importPathsBtn.addEventListener('click', () => {
+    if (!selectedPathFile) {
+      alert('Please select a path file first');
+      return;
+    }
+
+    if (!nodes || nodes.length === 0) {
+      alert('Please load a graph first before importing paths');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const textContent = e.target.result;
+        logEvent(`Importing paths from ${selectedPathFile.name}...`);
+        
+        // Import paths using the existing highlightPaths function
+        const results = importPathsFromText(textContent, nodes, savedPaths, highlightPaths);
+        
+        // Show results dialog
+        showImportResultsDialog(results);
+        
+        // Update the UI to reflect new paths
+        updatePathUI();
+        
+        // Log summary
+        const summary = `Import completed: ${results.successful.length} successful, ${results.failed.length} failed`;
+        logEvent(summary);
+        
+        // Clear the file input
+        pathFileInput.value = '';
+        selectedPathFile = null;
+        importPathsBtn.disabled = true;
+        importPathsBtn.textContent = 'Import Paths';
+        
+      } catch (error) {
+        console.error('Error importing paths:', error);
+        alert(`Error importing paths: ${error.message}`);
+        logEvent(`Import error: ${error.message}`);
+      }
+    };
+
+    reader.onerror = () => {
+      alert('Error reading file');
+      logEvent('Error reading path file');
+    };
+
+    reader.readAsText(selectedPathFile);
+  });
+}
+
+// Enhanced error handling for file operations
+window.addEventListener('error', (e) => {
+  if (e.filename && e.filename.includes('path-importer')) {
+    logEvent(`Path import error: ${e.message}`);
+  }
+});
+
+// Add keyboard shortcut for import (Ctrl+I)
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  
+  if ((e.ctrlKey || e.metaKey) && e.key === 'i') {
+    e.preventDefault();
+    if (pathFileInput) {
+      pathFileInput.click();
+    }
+  }
 });
 
 // Make functions globally available for UI
