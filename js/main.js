@@ -1498,15 +1498,6 @@ document.addEventListener('keydown', (e) => {
 });
 
 // FIXED: Force create export button after page load
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('DOM loaded, ensuring export button exists...');
-  setTimeout(() => {
-    if (!exportButton) {
-      exportButton = createExportButton();
-      console.log('Export button created on DOM load');
-    }
-  }, 100);
-});
 
 // Make functions globally available for UI
 window.deletePath = deletePath;

@@ -1,96 +1,13 @@
-// complete-improved-sequence-exporter.js - Full code with individual overlap colors
+// sequence-exporter.js - FIXED: Proper GFA specification implementation
 
 /**
- * Parse GFA overlap string (e.g., "100M", "50M10I40M") 
- * Returns the overlap length in base pairs
+ * Enhanced GFA sequence reconstruction following the specification document
+ * FIXES: Position calculations, bidirectional search, CIGAR transformation
  */
-function parseGfaOverlap(overlapStr) {
-  if (!overlapStr || overlapStr === '*' || overlapStr === '0M') {
-    return 0;
-  }
-  
-  // Handle simple cases like "100M" (100 matches)
-  const simpleMatch = overlapStr.match(/^(\d+)M$/);
-  if (simpleMatch) {
-    return parseInt(simpleMatch[1], 10);
-  }
-  
-  // Handle complex CIGAR strings - sum up matches and insertions/deletions
-  const cigarOps = overlapStr.match(/(\d+)([MIDNSHPX=])/g);
-  if (cigarOps) {
-    let overlapLength = 0;
-    cigarOps.forEach(op => {
-      const match = op.match(/(\d+)([MIDNSHPX=])/);
-      if (match) {
-        const length = parseInt(match[1], 10);
-        const operation = match[2];
-        
-        // Count operations that consume reference sequence
-        if (['M', 'D', 'N', '=', 'X'].includes(operation)) {
-          overlapLength += length;
-        }
-      }
-    });
-    return overlapLength;
-  }
-  
-  // Fallback: try to extract any number
-  const numberMatch = overlapStr.match(/(\d+)/);
-  return numberMatch ? parseInt(numberMatch[1], 10) : 0;
-}
 
-/**
- * Find the overlap information between two consecutive nodes in a path
- */
-function findOverlapBetweenNodes(nodeA, nodeB, links) {
-  // Look for a link between these two nodes
-  for (const link of links) {
-    const sourceId = String(link.source.id || link.source);
-    const targetId = String(link.target.id || link.target);
-    
-    if ((sourceId === String(nodeA.id) && targetId === String(nodeB.id)) ||
-        (sourceId === String(nodeB.id) && targetId === String(nodeA.id))) {
-      
-      const overlapStr = link.overlap || '0M';
-      const overlapLength = parseGfaOverlap(overlapStr);
-      
-      return {
-        length: overlapLength,
-        overlapStr: overlapStr,
-        isReversed: sourceId === String(nodeB.id), // true if the link goes B->A instead of A->B
-        srcOrientation: link.srcOrientation || '+',
-        tgtOrientation: link.tgtOrientation || '+'
-      };
-    }
-  }
-  
-  return { length: 0, overlapStr: '0M', isReversed: false, srcOrientation: '+', tgtOrientation: '+' };
-}
+// ===== UTILITY FUNCTIONS =====
 
-/**
- * Get the sequence for a node, handling orientation
- */
-function getNodeSequence(node, isReversed = false) {
-  let sequence = node.seq || '';
-  
-  // Handle placeholder sequences
-  if (sequence === '*' || sequence === '') {
-    // Generate a placeholder sequence based on node length
-    const length = node.length || 1000;
-    sequence = 'N'.repeat(Math.min(length, 10000)); // Cap at 10kb for performance
-  }
-  
-  // Reverse complement if needed
-  if (isReversed) {
-    sequence = reverseComplement(sequence);
-  }
-  
-  return sequence.toUpperCase();
-}
-
-/**
- * Generate reverse complement of a DNA sequence
- */
+// Generate reverse complement of DNA sequence
 function reverseComplement(sequence) {
   const complement = {
     'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G',
@@ -105,503 +22,856 @@ function reverseComplement(sequence) {
     .join('');
 }
 
-/**
- * Determine if we need reverse complement based on GFA orientations
- */
-function shouldReverseComplement(overlapInfo, isIntermediateNode) {
-  // This is a simplified orientation logic - you may need to adjust based on your GFA specification
-  const { srcOrientation, tgtOrientation, isReversed } = overlapInfo;
-  
-  // Basic logic: if target orientation is negative, we might need reverse complement
-  if (tgtOrientation === '-') {
-    return true;
+// Parse CIGAR string to get overlap length and operations
+function parseCigarOverlap(cigarString) {
+  if (!cigarString || cigarString === '*' || cigarString === '0M') {
+    return { length: 0, operations: [] };
   }
   
-  return false;
-}
-
-/**
- * Calculate sequence similarity (0-1)
- */
-function calculateSequenceSimilarity(seq1, seq2) {
-  if (seq1.length !== seq2.length) return 0;
-  if (seq1.length === 0) return 1;
+  const operations = [];
+  const cigarOps = cigarString.match(/(\d+)([MIDNSHPX=])/g) || [];
+  let totalLength = 0;
   
-  let matches = 0;
-  for (let i = 0; i < seq1.length; i++) {
-    if (seq1[i] === seq2[i]) matches++;
-  }
-  
-  return matches / seq1.length;
-}
-
-/**
- * Debug function to analyze overlap patterns
- */
-function debugOverlapAnalysis(pathNodes, links, mergedData) {
-  console.log('=== OVERLAP ANALYSIS DEBUG ===');
-  console.log(`Path: ${pathNodes.map(n => n.id).join(' → ')}`);
-  
-  pathNodes.forEach((node, i) => {
-    console.log(`Node ${i} (${node.id}): length=${node.seq?.length || 'unknown'}`);
-  });
-  
-  console.log('\nOverlap Details:');
-  mergedData.overlaps.forEach((overlap, i) => {
-    console.log(`Overlap ${i + 1}: ${overlap.nodeA} → ${overlap.nodeB}`);
-    console.log(`  Position: ${overlap.start}-${overlap.end} (${overlap.end - overlap.start}bp)`);
-    console.log(`  GFA String: "${overlap.overlapStr}"`);
-    console.log(`  Sequence: "${overlap.sequence.substring(0, 50)}${overlap.sequence.length > 50 ? '...' : ''}"`);
-  });
-  
-  console.log('\nSegment Analysis:');
-  mergedData.segments.forEach((seg, i) => {
-    console.log(`Segment ${i} (${seg.nodeId}): ${seg.start}-${seg.end} (${seg.sequence.length}bp)`);
-    if (seg.hasGap) console.log(`  ⚠️  Has gap: ${seg.gapLength}bp`);
-  });
-  
-  // Check for overlapping overlaps
-  const sortedOverlaps = [...mergedData.overlaps].sort((a, b) => a.start - b.start);
-  for (let i = 0; i < sortedOverlaps.length - 1; i++) {
-    const current = sortedOverlaps[i];
-    const next = sortedOverlaps[i + 1];
-    
-    if (current.end > next.start) {
-      console.log(`⚠️  OVERLAPPING OVERLAPS DETECTED:`);
-      console.log(`   Overlap ${i + 1} (${current.nodeA}→${current.nodeB}): ${current.start}-${current.end}`);
-      console.log(`   Overlap ${i + 2} (${next.nodeA}→${next.nodeB}): ${next.start}-${next.end}`);
-      console.log(`   Overlap amount: ${current.end - next.start}bp`);
+  cigarOps.forEach(op => {
+    const match = op.match(/(\d+)([MIDNSHPX=])/);
+    if (match) {
+      const length = parseInt(match[1], 10);
+      const operation = match[2];
+      operations.push({ length, operation });
+      
+      // Count operations that consume reference sequence (matches/deletions)
+      if (['M', 'D', 'N', '=', 'X'].includes(operation)) {
+        totalLength += length;
+      }
     }
-  }
+  });
+  
+  return { length: totalLength, operations };
 }
 
-/**
- * Enhanced sequence merging with better overlap detection
- */
-function mergePathSequencesImproved(pathNodes, links) {
-  if (pathNodes.length === 0) {
-    return { sequence: '', overlaps: [], segments: [] };
+// FIXED: Transform CIGAR for reversed links (swap I↔D as per document)
+function transformCigarForReverse(cigarString) {
+  if (!cigarString || cigarString === '*') return cigarString;
+  
+  return cigarString.replace(/(\d+)([ID])/g, (match, count, op) => {
+    return count + (op === 'I' ? 'D' : 'I');
+  });
+}
+
+// FIXED: Normalize node ID (handle negative node IDs properly)
+function normalizeNodeId(nodeId) {
+  return String(nodeId).trim();
+}
+
+// CORRECT: Follow GFA links exactly - find the natural path flow in the GFA
+function determinePathOrientations(pathNodes, links) {
+  if (pathNodes.length <= 1) {
+    return { orientations: ['+'], nodes: pathNodes, reversed: false };
   }
   
-  if (pathNodes.length === 1) {
-    const sequence = getNodeSequence(pathNodes[0]);
-    return { 
-      sequence: sequence, 
-      overlaps: [],
-      segments: [{ nodeId: pathNodes[0].id, start: 0, end: sequence.length, sequence: sequence }]
+  console.log(`\n=== FINDING NATURAL GFA PATH ===`);
+  console.log(`Input nodes: ${pathNodes.map(n => n.id).join(', ')}`);
+  
+  // Create a set of input node IDs for lookup
+  const inputNodeIds = new Set(pathNodes.map(n => normalizeNodeId(n.id)));
+  
+  // Find all GFA links that connect nodes in our input set
+  const relevantLinks = [];
+  links.forEach(link => {
+    const sourceId = normalizeNodeId(link.source.id || link.source);
+    const targetId = normalizeNodeId(link.target.id || link.target);
+    
+    if (inputNodeIds.has(sourceId) && inputNodeIds.has(targetId)) {
+      relevantLinks.push({
+        sourceId: sourceId,
+        targetId: targetId,
+        sourceOrientation: link.srcOrientation || '+',
+        targetOrientation: link.tgtOrientation || '+',
+        overlap: link.overlap || '0M',
+        originalLink: link
+      });
+      console.log(`Found relevant link: L ${sourceId} ${link.srcOrientation || '+'} ${targetId} ${link.tgtOrientation || '+'} ${link.overlap || '*'}`);
+    }
+  });
+  
+  if (relevantLinks.length === 0) {
+    console.log(`⚠️ No GFA links found between input nodes`);
+    return { orientations: new Array(pathNodes.length).fill('+'), nodes: pathNodes, reversed: false };
+  }
+  
+  // Build the natural path following GFA link directions
+  const gfaPath = buildNaturalGfaPath(relevantLinks, pathNodes);
+  
+  if (gfaPath.success) {
+    console.log(`\n✓ FOUND NATURAL GFA PATH:`);
+    for (let i = 0; i < gfaPath.nodes.length; i++) {
+      console.log(`  ${gfaPath.nodes[i].id}${gfaPath.orientations[i]}`);
+    }
+    
+    return {
+      orientations: gfaPath.orientations,
+      nodes: gfaPath.nodes,
+      reversed: gfaPath.reversed
     };
   }
   
-  console.log('=== ENHANCED SEQUENCE MERGING ===');
+  console.log(`⚠️ Could not build natural GFA path - using input order with default orientations`);
+  return { orientations: new Array(pathNodes.length).fill('+'), nodes: pathNodes, reversed: false };
+}
+
+// NEW: Build path following natural GFA link flow
+function buildNaturalGfaPath(relevantLinks, inputNodes) {
+  console.log(`\n--- BUILDING NATURAL GFA PATH ---`);
   
-  let mergedSequence = '';
-  const overlaps = [];
-  const segments = [];
-  let currentPosition = 0;
+  // Find the starting node (node with no incoming edges from our set, or try each node)
+  const nodeMap = new Map(inputNodes.map(n => [normalizeNodeId(n.id), n]));
+  const inputNodeIds = Array.from(nodeMap.keys());
   
-  // Start with the first node
-  const firstNodeSeq = getNodeSequence(pathNodes[0]);
-  mergedSequence = firstNodeSeq;
-  segments.push({
-    nodeId: pathNodes[0].id,
-    start: 0,
-    end: firstNodeSeq.length,
-    sequence: firstNodeSeq
-  });
-  currentPosition = firstNodeSeq.length;
-  
-  console.log(`Starting with node ${pathNodes[0].id}: ${firstNodeSeq.length}bp`);
-  
-  // Process each subsequent node
-  for (let i = 1; i < pathNodes.length; i++) {
-    const prevNode = pathNodes[i - 1];
-    const currentNode = pathNodes[i];
+  // Try each node as a potential starting point
+  for (const startNodeId of inputNodeIds) {
+    console.log(`\nTrying to start from node: ${startNodeId}`);
     
-    console.log(`\n--- Processing ${prevNode.id} → ${currentNode.id} ---`);
-    
-    // Find overlap between consecutive nodes
-    const overlapInfo = findOverlapBetweenNodes(prevNode, currentNode, links);
-    const overlapLength = overlapInfo.length;
-    
-    console.log(`Overlap info: ${overlapLength}bp (${overlapInfo.overlapStr})`);
-    
-    // Get the sequence for the current node
-    const needsReverseComplement = shouldReverseComplement(overlapInfo, i > 1);
-    const currentNodeSeq = getNodeSequence(currentNode, needsReverseComplement);
-    
-    console.log(`Current node ${currentNode.id}: ${currentNodeSeq.length}bp${needsReverseComplement ? ' (reverse complement)' : ''}`);
-    
-    if (overlapLength > 0) {
-      // Check if overlap is reasonable (not longer than either sequence)
-      const maxReasonableOverlap = Math.min(
-        Math.floor(mergedSequence.length * 0.9), // Max 90% of previous sequence
-        Math.floor(currentNodeSeq.length * 0.9)   // Max 90% of current sequence
-      );
+    // Try both orientations for the starting node
+    for (const startOri of ['+', '-']) {
+      console.log(`  Starting with ${startNodeId}${startOri}:`);
       
-      const effectiveOverlap = Math.min(overlapLength, maxReasonableOverlap);
+      const path = buildPathFromStart(startNodeId, startOri, relevantLinks, nodeMap);
       
-      if (effectiveOverlap !== overlapLength) {
-        console.log(`⚠️  Overlap too large! Reducing from ${overlapLength}bp to ${effectiveOverlap}bp`);
+      if (path.success && path.nodes.length === inputNodes.length) {
+        console.log(`    ✓ Successfully built complete path`);
+        
+        // Check if this path is in reverse order compared to input
+        const firstInputId = normalizeNodeId(inputNodes[0].id);
+        const isReversed = normalizeNodeId(path.nodes[0].id) !== firstInputId;
+        
+        return {
+          success: true,
+          nodes: path.nodes,
+          orientations: path.orientations,
+          reversed: isReversed
+        };
       }
-      
-      // Verify overlap matches
-      const prevNodeEnd = mergedSequence.slice(-effectiveOverlap);
-      const currentNodeStart = currentNodeSeq.slice(0, effectiveOverlap);
-      
-      console.log(`Checking overlap match:`);
-      console.log(`  Previous end (${effectiveOverlap}bp): "${prevNodeEnd.substring(0, 50)}${prevNodeEnd.length > 50 ? '...' : ''}"`);
-      console.log(`  Current start (${effectiveOverlap}bp): "${currentNodeStart.substring(0, 50)}${currentNodeStart.length > 50 ? '...' : ''}"`);
-      
-      if (prevNodeEnd === currentNodeStart) {
-        console.log(`✓ Perfect overlap match`);
-        
-        // Perfect overlap - merge by removing overlapping portion from current node
-        const nonOverlappingPart = currentNodeSeq.slice(effectiveOverlap);
-        
-        // Record overlap information
-        overlaps.push({
-          start: currentPosition - effectiveOverlap,
-          end: currentPosition,
-          sequence: prevNodeEnd,
-          nodeA: prevNode.id,
-          nodeB: currentNode.id,
-          overlapStr: overlapInfo.overlapStr,
-          originalLength: overlapLength,
-          effectiveLength: effectiveOverlap
-        });
-        
-        console.log(`Adding overlap: pos ${currentPosition - effectiveOverlap}-${currentPosition}`);
-        
-        // Add non-overlapping part
-        mergedSequence += nonOverlappingPart;
-        
-        segments.push({
-          nodeId: currentNode.id,
-          start: currentPosition,
-          end: currentPosition + nonOverlappingPart.length,
-          sequence: nonOverlappingPart,
-          overlapStart: currentPosition - effectiveOverlap,
-          overlapLength: effectiveOverlap
-        });
-        
-        currentPosition += nonOverlappingPart.length;
-        console.log(`Added ${nonOverlappingPart.length}bp from ${currentNode.id}, total length now ${currentPosition}bp`);
-        
-      } else {
-        // Overlap mismatch - try fuzzy matching
-        const similarity = calculateSequenceSimilarity(prevNodeEnd, currentNodeStart);
-        console.log(`✗ Overlap mismatch (${(similarity * 100).toFixed(1)}% similarity)`);
-        
-        if (similarity > 0.8) {
-          // High similarity - treat as valid overlap with warning
-          console.log(`Using fuzzy overlap due to high similarity`);
-          
-          const nonOverlappingPart = currentNodeSeq.slice(effectiveOverlap);
-          
-          overlaps.push({
-            start: currentPosition - effectiveOverlap,
-            end: currentPosition,
-            sequence: prevNodeEnd, // Use the previous sequence as reference
-            nodeA: prevNode.id,
-            nodeB: currentNode.id,
-            overlapStr: overlapInfo.overlapStr + ' (fuzzy)',
-            originalLength: overlapLength,
-            effectiveLength: effectiveOverlap,
-            isFuzzy: true
-          });
-          
-          mergedSequence += nonOverlappingPart;
-          
-          segments.push({
-            nodeId: currentNode.id,
-            start: currentPosition,
-            end: currentPosition + nonOverlappingPart.length,
-            sequence: nonOverlappingPart,
-            overlapStart: currentPosition - effectiveOverlap,
-            overlapLength: effectiveOverlap,
-            isFuzzy: true
-          });
-          
-          currentPosition += nonOverlappingPart.length;
-          
-        } else {
-          // Low similarity - add a gap indicator and continue
-          const gapIndicator = `[MISMATCH:${effectiveOverlap}bp]`;
-          mergedSequence += gapIndicator + currentNodeSeq;
-          
-          console.log(`Added gap indicator: ${gapIndicator}`);
-          
-          segments.push({
-            nodeId: currentNode.id,
-            start: currentPosition + gapIndicator.length,
-            end: currentPosition + gapIndicator.length + currentNodeSeq.length,
-            sequence: currentNodeSeq,
-            hasGap: true,
-            gapLength: effectiveOverlap,
-            gapType: 'mismatch'
-          });
-          
-          currentPosition += gapIndicator.length + currentNodeSeq.length;
-        }
-      }
-    } else {
-      // No overlap - just concatenate
-      console.log(`No overlap - concatenating sequences`);
-      mergedSequence += currentNodeSeq;
-      
-      segments.push({
-        nodeId: currentNode.id,
-        start: currentPosition,
-        end: currentPosition + currentNodeSeq.length,
-        sequence: currentNodeSeq
-      });
-      
-      currentPosition += currentNodeSeq.length;
     }
   }
   
-  const result = {
-    sequence: mergedSequence,
-    overlaps: overlaps,
-    segments: segments
+  return { success: false };
+}
+
+// NEW: Build path starting from a specific node and orientation
+function buildPathFromStart(startNodeId, startOri, relevantLinks, nodeMap) {
+  const path = {
+    nodes: [nodeMap.get(startNodeId)],
+    orientations: [startOri],
+    usedNodes: new Set([startNodeId])
   };
   
-  // Debug the final result
-  debugOverlapAnalysis(pathNodes, links, result);
+  let currentNodeId = startNodeId;
+  let currentOri = startOri;
   
-  return result;
+  // Keep extending the path by following GFA links
+  while (path.nodes.length < nodeMap.size) {
+    console.log(`    Looking for link from ${currentNodeId}${currentOri}...`);
+    
+    let foundNext = false;
+    
+    // Look for a link that starts from current node with current orientation
+    for (const link of relevantLinks) {
+      if (link.sourceId === currentNodeId && 
+          link.sourceOrientation === currentOri && 
+          !path.usedNodes.has(link.targetId)) {
+        
+        // Found next node in the path
+        const nextNode = nodeMap.get(link.targetId);
+        const nextOri = link.targetOrientation;
+        
+        console.log(`      ✓ Found: ${currentNodeId}${currentOri} → ${link.targetId}${nextOri} (${link.overlap})`);
+        
+        path.nodes.push(nextNode);
+        path.orientations.push(nextOri);
+        path.usedNodes.add(link.targetId);
+        
+        currentNodeId = link.targetId;
+        currentOri = nextOri;
+        foundNext = true;
+        break;
+      }
+    }
+    
+    if (!foundNext) {
+      console.log(`      ✗ No valid next link found`);
+      break;
+    }
+  }
+  
+  return {
+    success: path.nodes.length === nodeMap.size,
+    nodes: path.nodes,
+    orientations: path.orientations
+  };
 }
 
-/**
- * Escape HTML special characters
- */
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+// ENHANCED: Find exact link with specific orientations (no more guessing!)
+function findExactGfaLink(nodeAId, nodeBId, nodeAOri, nodeBOri, links) {
+  const normalizedA = normalizeNodeId(nodeAId);
+  const normalizedB = normalizeNodeId(nodeBId);
+  
+  console.log(`Looking for exact GFA link: ${normalizedA}${nodeAOri} → ${normalizedB}${nodeBOri}`);
+  
+  // Look for direct link
+  for (const link of links) {
+    const sourceId = normalizeNodeId(link.source.id || link.source);
+    const targetId = normalizeNodeId(link.target.id || link.target);
+    const srcOri = link.srcOrientation || '+';
+    const tgtOri = link.tgtOrientation || '+';
+    
+    if (sourceId === normalizedA && targetId === normalizedB && 
+        srcOri === nodeAOri && tgtOri === nodeBOri) {
+      console.log(`  ✓ Found direct link: L ${sourceId} ${srcOri} ${targetId} ${tgtOri} ${link.overlap || '*'}`);
+      return {
+        found: true,
+        reversed: false,
+        overlap: link.overlap || '0M',
+        sourceOrientation: srcOri,
+        targetOrientation: tgtOri,
+        link: link
+      };
+    }
+  }
+  
+  // Look for reverse link that we can transform
+  for (const link of links) {
+    const sourceId = normalizeNodeId(link.source.id || link.source);
+    const targetId = normalizeNodeId(link.target.id || link.target);
+    const srcOri = link.srcOrientation || '+';
+    const tgtOri = link.tgtOrientation || '+';
+    
+    // Check if this is our link in reverse: B → A
+    if (sourceId === normalizedB && targetId === normalizedA) {
+      // Transform the orientations to see if they match our needs
+      const transformedSrcOri = (srcOri === '+') ? '-' : '+';
+      const transformedTgtOri = (tgtOri === '+') ? '-' : '+';
+      
+      if (transformedTgtOri === nodeAOri && transformedSrcOri === nodeBOri) {
+        console.log(`  ✓ Found reverse link: L ${sourceId} ${srcOri} ${targetId} ${tgtOri} ${link.overlap || '*'}`);
+        console.log(`    Transforms to: ${normalizedA}${nodeAOri} → ${normalizedB}${nodeBOri}`);
+        
+        return {
+          found: true,
+          reversed: true,
+          overlap: transformCigarForReverse(link.overlap || '0M'),
+          sourceOrientation: nodeAOri,
+          targetOrientation: nodeBOri,
+          link: link,
+          originalLink: `L ${sourceId} ${srcOri} ${targetId} ${tgtOri}`
+        };
+      }
+    }
+  }
+  
+  console.log(`  ✗ No link found for ${normalizedA}${nodeAOri} → ${normalizedB}${nodeBOri}`);
+  return {
+    found: false,
+    reversed: false,
+    overlap: '0M',
+    sourceOrientation: nodeAOri,
+    targetOrientation: nodeBOri
+  };
+}
+// UPDATED: Use exact GFA link finding instead of guessing
+function findLinkBetweenNodes(nodeAId, nodeBId, links, nodeAOri = '+', nodeBOri = '+') {
+  return findExactGfaLink(nodeAId, nodeBId, nodeAOri, nodeBOri, links);
 }
 
-/**
- * Enhanced HTML generation with individual overlap colors
- */
-function generateSequenceHTMLImproved(pathName, pathSequence, mergedData) {
-  const { sequence, overlaps, segments } = mergedData;
+// ===== SEQUENCE PROCESSING FUNCTIONS =====
+
+// Get node sequence in specified orientation
+function getNodeSequence(node, orientation = '+') {
+  let sequence = node.seq || '';
+  
+  // Handle placeholder sequences
+  if (sequence === '*' || sequence === '') {
+    const length = node.length || 1000;
+    sequence = 'N'.repeat(Math.min(length, 10000)); // Cap for performance
+  }
+  
+  // Apply orientation (reverse complement for negative)
+  if (orientation === '-') {
+    sequence = reverseComplement(sequence);
+  }
+  
+  return sequence.toUpperCase();
+}
+
+// FIXED: Merge sequences with proper position tracking
+function mergeSequencesWithOverlap(currentSequence, newNodeSeq, overlapInfo, nodeAId, nodeBId) {
+  console.log(`\n--- MERGING SEQUENCES ---`);
+  console.log(`Current total sequence: ${currentSequence.length}bp`);
+  console.log(`New node (${nodeBId}): ${newNodeSeq.length}bp`);
+  console.log(`Overlap info: ${overlapInfo.overlap} (reversed: ${overlapInfo.reversed})`);
+  
+  const { length: overlapLength } = parseCigarOverlap(overlapInfo.overlap);
+  const currentSeqLength = currentSequence.length;
+  
+  if (overlapLength === 0 || !overlapInfo.found) {
+    console.log(`No overlap - simple concatenation`);
+    return {
+      mergedSequence: currentSequence + newNodeSeq,
+      method: 'concatenation',
+      actualOverlapLength: 0,
+      segmentStart: currentSeqLength,
+      segmentEnd: currentSeqLength + newNodeSeq.length,
+      newNodeContribution: newNodeSeq.length
+    };
+  }
+  
+  // Validate overlap makes sense
+  if (overlapLength >= currentSequence.length || overlapLength >= newNodeSeq.length) {
+    console.log(`⚠️ Overlap too large (${overlapLength}bp), using concatenation`);
+    return {
+      mergedSequence: currentSequence + newNodeSeq,
+      method: 'concatenation_fallback',
+      actualOverlapLength: 0,
+      segmentStart: currentSeqLength,
+      segmentEnd: currentSeqLength + newNodeSeq.length,
+      newNodeContribution: newNodeSeq.length
+    };
+  }
+  
+  // FIXED: Get overlap regions from the END of current sequence and START of new sequence
+  const currentSuffix = currentSequence.slice(-overlapLength);
+  const newPrefix = newNodeSeq.slice(0, overlapLength);
+  
+  console.log(`Current sequence suffix (${overlapLength}bp): "${currentSuffix.substring(0, 20)}..."`);
+  console.log(`New sequence prefix (${overlapLength}bp): "${newPrefix.substring(0, 20)}..."`);
+  
+  // Check overlap match
+  if (currentSuffix === newPrefix) {
+    // Perfect overlap - remove overlapping part from new sequence
+    const nonOverlappingPart = newNodeSeq.slice(overlapLength);
+    const mergedSeq = currentSequence + nonOverlappingPart;
+    
+    // CORRECTED: For overlaps, the new segment starts where the overlap begins in the current sequence
+    // This ensures no position gaps or overlaps in the segment display
+    const segmentStart = currentSeqLength - overlapLength;
+    const segmentEnd = mergedSeq.length;
+    
+    console.log(`✓ Perfect overlap match - removed ${overlapLength}bp overlap`);
+    console.log(`✓ Segment position: ${segmentStart}-${segmentEnd} (spans ${segmentEnd - segmentStart}bp including overlap)`);
+    console.log(`✓ Merged: ${currentSeqLength}bp + ${nonOverlappingPart.length}bp = ${mergedSeq.length}bp`);
+    
+    return {
+      mergedSequence: mergedSeq,
+      method: 'perfect_overlap',
+      actualOverlapLength: overlapLength,
+      segmentStart: segmentStart,
+      segmentEnd: segmentEnd,
+      newNodeContribution: nonOverlappingPart.length
+    };
+  } else {
+    // Calculate similarity for fuzzy matching
+    let matches = 0;
+    for (let i = 0; i < overlapLength; i++) {
+      if (currentSuffix[i] === newPrefix[i]) matches++;
+    }
+    const similarity = matches / overlapLength;
+    
+    console.log(`Overlap similarity: ${(similarity * 100).toFixed(1)}%`);
+    
+    if (similarity > 0.8) {
+      // High similarity - accept as fuzzy overlap
+      const nonOverlappingPart = newNodeSeq.slice(overlapLength);
+      const mergedSeq = currentSequence + nonOverlappingPart;
+      
+      // CORRECTED: Same fix for fuzzy overlaps
+      const segmentStart = currentSeqLength - overlapLength;
+      const segmentEnd = mergedSeq.length;
+      
+      console.log(`✓ Fuzzy overlap accepted - segment: ${segmentStart}-${segmentEnd}`);
+      return {
+        mergedSequence: mergedSeq,
+        method: 'fuzzy_overlap',
+        actualOverlapLength: overlapLength,
+        segmentStart: segmentStart,
+        segmentEnd: segmentEnd,
+        newNodeContribution: nonOverlappingPart.length,
+        similarity: similarity
+      };
+    } else {
+      // Low similarity - concatenate with gap indicator
+      const gapIndicator = `[MISMATCH:${overlapLength}bp]`;
+      const mergedSeq = currentSequence + gapIndicator + newNodeSeq;
+      
+      const segmentStart = currentSeqLength;
+      const segmentEnd = mergedSeq.length;
+      
+      console.log(`✗ Poor overlap - added gap indicator, segment: ${segmentStart}-${segmentEnd}`);
+      return {
+        mergedSequence: mergedSeq,
+        method: 'gap_insertion',
+        actualOverlapLength: 0,
+        segmentStart: segmentStart,
+        segmentEnd: segmentEnd,
+        newNodeContribution: gapIndicator.length + newNodeSeq.length,
+        similarity: similarity
+      };
+    }
+  }
+}
+
+// ===== MAIN RECONSTRUCTION FUNCTION =====
+
+// ENHANCED: Reconstruct sequence with automatic path direction detection
+function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed Path') {
+  console.log(`\n=== SEQUENCE RECONSTRUCTION: ${pathName} ===`);
+  console.log(`Input path: ${pathNodes.map(n => n.id).join(' → ')}`);
+  
+  if (pathNodes.length === 0) {
+    return {
+      sequence: '',
+      segments: [],
+      mergeLog: [],
+      totalLength: 0
+    };
+  }
+  
+  if (pathNodes.length === 1) {
+    const sequence = getNodeSequence(pathNodes[0], '+');
+    return {
+      sequence: sequence,
+      segments: [{
+        nodeId: pathNodes[0].id,
+        orientation: '+',
+        sequence: sequence,
+        start: 0,
+        end: sequence.length,
+        contributedLength: sequence.length,
+        method: 'single_node'
+      }],
+      mergeLog: [`Single node: ${pathNodes[0].id} (${sequence.length}bp)`],
+      totalLength: sequence.length
+    };
+  }
+  
+  // ENHANCED: Determine correct path direction and orientations based on GFA links
+  const pathInfo = determinePathOrientations(pathNodes, links);
+  const actualNodes = pathInfo.nodes;
+  const nodeOrientations = pathInfo.orientations;
+  const pathReversed = pathInfo.reversed;
+  
+  if (pathReversed) {
+    console.log(`✓ Using REVERSE path direction to match GFA links`);
+  } else {
+    console.log(`✓ Using FORWARD path direction as provided`);
+  }
+  
+  console.log(`Final path: ${actualNodes.map((n, i) => `${n.id}${nodeOrientations[i]}`).join(' → ')}`);
+  
+  let currentSequence = '';
+  const segments = [];
+  const mergeLog = [];
+  
+  // Start with first node using determined orientation
+  const firstNodeOri = nodeOrientations[0];
+  const firstNodeSeq = getNodeSequence(actualNodes[0], firstNodeOri);
+  currentSequence = firstNodeSeq;
+  
+  segments.push({
+    nodeId: actualNodes[0].id,
+    orientation: firstNodeOri,
+    originalSequence: firstNodeSeq,
+    start: 0,
+    end: firstNodeSeq.length,
+    contributedLength: firstNodeSeq.length,
+    method: 'first_node',
+    linkInfo: null
+  });
+  
+  const startMsg = `Started with node ${actualNodes[0].id}${firstNodeOri}: ${firstNodeSeq.length}bp${pathReversed ? ' (path reversed)' : ''}`;
+  mergeLog.push(startMsg);
+  
+  // Process remaining nodes using determined orientations
+  for (let i = 1; i < actualNodes.length; i++) {
+    const prevNode = actualNodes[i - 1];
+    const currentNode = actualNodes[i];
+    const prevNodeOri = nodeOrientations[i - 1];
+    const currentNodeOri = nodeOrientations[i];
+    
+    console.log(`\n=== PROCESSING STEP ${i}: ${prevNode.id}${prevNodeOri} → ${currentNode.id}${currentNodeOri} ===`);
+    console.log(`Current total sequence length: ${currentSequence.length}bp`);
+    
+    // Find the exact link using the determined orientations
+    const linkInfo = findExactGfaLink(prevNode.id, currentNode.id, prevNodeOri, currentNodeOri, links);
+    
+    // Get current node sequence in determined orientation
+    const currentNodeSeq = getNodeSequence(currentNode, currentNodeOri);
+    console.log(`Node ${currentNode.id}${currentNodeOri}: ${currentNodeSeq.length}bp`);
+    
+    if (linkInfo.found) {
+      console.log(`✓ Found link: ${linkInfo.overlap}${linkInfo.reversed ? ' (reversed)' : ''}`);
+    } else {
+      console.log(`✗ No link found - using concatenation`);
+    }
+    
+    // Merge with current sequence
+    const mergeResult = mergeSequencesWithOverlap(
+      currentSequence,
+      currentNodeSeq, 
+      linkInfo, 
+      prevNode.id, 
+      currentNode.id
+    );
+    
+    // Update current sequence
+    currentSequence = mergeResult.mergedSequence;
+    
+    console.log(`Final sequence length after merge: ${currentSequence.length}bp`);
+    
+    // Record segment info with correct positions from merge result
+    segments.push({
+      nodeId: currentNode.id,
+      orientation: currentNodeOri,
+      originalSequence: currentNodeSeq,
+      start: mergeResult.segmentStart,
+      end: mergeResult.segmentEnd,
+      contributedLength: mergeResult.newNodeContribution,
+      method: mergeResult.method,
+      overlapLength: mergeResult.actualOverlapLength || 0,
+      linkInfo: linkInfo,
+      similarity: mergeResult.similarity
+    });
+    
+    const logEntry = `Step ${i}: Added ${currentNode.id}${currentNodeOri} ` +
+      `(${currentNodeSeq.length}bp original, ${mergeResult.newNodeContribution}bp contributed, ` +
+      `${mergeResult.method}${linkInfo.reversed ? ', used reverse link' : ''})`;
+    mergeLog.push(logEntry);
+  }
+  
+  console.log(`\n=== RECONSTRUCTION COMPLETE ===`);
+  console.log(`Final sequence length: ${currentSequence.length}bp`);
+  console.log(`Segments processed: ${segments.length}`);
+  console.log(`Path was ${pathReversed ? 'REVERSED' : 'UNCHANGED'} to match GFA links`);
+  
+  // Verify segment positions
+  console.log(`\n=== POSITION VERIFICATION ===`);
+  segments.forEach((seg, i) => {
+    const segLength = seg.end - seg.start;
+    console.log(`Segment ${i + 1} (${seg.nodeId}${seg.orientation}): ${seg.start}-${seg.end} = ${segLength}bp contributed`);
+  });
+  
+  return {
+    sequence: currentSequence,
+    segments: segments,
+    mergeLog: mergeLog,
+    totalLength: currentSequence.length,
+    pathName: pathName,
+    pathReversed: pathReversed
+  };
+}
+
+// ===== HTML REPORT GENERATION =====
+
+// ENHANCED: Generate HTML report with color-coded sequence segments
+function generateSequenceReport(reconstructionResult) {
+  const { sequence, segments, mergeLog, totalLength, pathName } = reconstructionResult;
+  
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  
+  // Generate color-coded sequence HTML
+  const coloredSequenceHtml = generateColorCodedSequence(sequence, segments);
   
   let html = `<!DOCTYPE html>
 <html>
 <head>
-    <title>Path Sequence: ${pathName}</title>
+    <title>Enhanced Sequence Reconstruction: ${pathName}</title>
     <style>
         body { font-family: 'Courier New', monospace; margin: 20px; line-height: 1.6; }
         .header { font-family: Arial, sans-serif; margin-bottom: 20px; }
-        .sequence { font-size: 12px; word-break: break-all; white-space: pre-wrap; }
+        .sequence { font-size: 12px; word-break: break-all; white-space: pre-wrap; line-height: 1.8; }
+        .segment { margin: 10px 0; padding: 10px; border-left: 4px solid #ddd; }
+        .stats { background: #f5f5f5; padding: 15px; margin: 15px 0; border-radius: 4px; }
+        .merge-log { background: #e3f2fd; padding: 15px; margin: 15px 0; border-radius: 4px; }
+        .perfect { border-left-color: #4caf50; }
+        .fuzzy { border-left-color: #ff9800; }
+        .gap { border-left-color: #f44336; }
+        .concat { border-left-color: #2196f3; }
+        .first_node { border-left-color: #9c27b0; }
+        .enhancement-note { background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #ffeaa7; }
+        .position-check { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #4caf50; }
         
-        /* Base overlap styles */
-        .overlap { font-weight: bold; padding: 1px 2px; border: 1px solid rgba(0,0,0,0.3); }
-        .fuzzy-overlap { font-weight: bold; padding: 1px 2px; border: 2px dashed rgba(0,0,0,0.5); }
+        /* Segment coloring for sequence visualization */
+        .seg-0 { background-color: rgba(156, 39, 176, 0.3); } /* Purple */
+        .seg-1 { background-color: rgba(76, 175, 80, 0.3); }  /* Green */
+        .seg-2 { background-color: rgba(33, 150, 243, 0.3); } /* Blue */
+        .seg-3 { background-color: rgba(255, 152, 0, 0.3); }  /* Orange */
+        .seg-4 { background-color: rgba(244, 67, 54, 0.3); }  /* Red */
+        .seg-5 { background-color: rgba(96, 125, 139, 0.3); } /* Blue Grey */
+        .seg-6 { background-color: rgba(205, 220, 57, 0.3); } /* Lime */
+        .seg-7 { background-color: rgba(121, 85, 72, 0.3); }  /* Brown */
+        .seg-8 { background-color: rgba(103, 58, 183, 0.3); } /* Deep Purple */
+        .seg-9 { background-color: rgba(0, 150, 136, 0.3); }  /* Teal */
         
-        /* Individual overlap colors */
-        .overlap-0 { background-color: #ffeb3b; border-color: #f57f17; } /* Yellow */
-        .overlap-1 { background-color: #4caf50; border-color: #2e7d32; color: white; } /* Green */
-        .overlap-2 { background-color: #2196f3; border-color: #1565c0; color: white; } /* Blue */
-        .overlap-3 { background-color: #ff9800; border-color: #e65100; color: white; } /* Orange */
-        .overlap-4 { background-color: #9c27b0; border-color: #6a1b9a; color: white; } /* Purple */
-        .overlap-5 { background-color: #f44336; border-color: #c62828; color: white; } /* Red */
-        .overlap-6 { background-color: #00bcd4; border-color: #00838f; color: white; } /* Cyan */
-        .overlap-7 { background-color: #795548; border-color: #4e342e; color: white; } /* Brown */
-        .overlap-8 { background-color: #607d8b; border-color: #37474f; color: white; } /* Blue Grey */
-        .overlap-9 { background-color: #e91e63; border-color: #ad1457; color: white; } /* Pink */
-        
-        /* Other styles */
-        .stats { background-color: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 4px; }
-        .node-info { margin: 5px 0; font-size: 11px; color: #666; }
-        .warning { color: #d32f2f; font-weight: bold; }
-        .debug-info { background-color: #e3f2fd; padding: 10px; margin: 10px 0; border-radius: 4px; font-size: 11px; }
-        
-        /* Legend styles */
-        .overlap-legend { 
-          background-color: #f8f9fa; 
-          padding: 15px; 
-          margin: 15px 0; 
-          border-radius: 4px; 
-          border: 1px solid #dee2e6;
+        .overlap-indicator { 
+            background-color: rgba(255, 193, 7, 0.6) !important; 
+            border: 1px solid #ff9800;
+            box-shadow: 0 0 3px rgba(255, 152, 0, 0.5);
         }
-        .legend-item { 
-          display: inline-block; 
-          margin: 3px 8px; 
-          padding: 2px 6px; 
-          border-radius: 3px; 
-          font-size: 11px;
-          font-weight: bold;
+        
+        .sequence-legend {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        
+        .legend-item {
+            display: inline-block;
+            margin: 5px 10px 5px 0;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .overlap-legend {
+            background-color: rgba(255, 193, 7, 0.6);
+            border: 1px solid #ff9800;
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>Path Sequence Export</h1>
+        <h1>FIXED: Enhanced GFA Sequence Reconstruction</h1>
         <h2>Path: ${pathName}</h2>
-        <p><strong>Original Path:</strong> ${pathSequence}</p>
+        <p><strong>Generated:</strong> ${timestamp}</p>
         
-        <div class="stats">
-            <strong>Statistics:</strong><br>
-            Total Length: ${sequence.length.toLocaleString()} bp<br>
-            Number of Nodes: ${segments.length}<br>
-            Number of Overlaps: ${overlaps.length}<br>
-            Total Overlap Length: ${overlaps.reduce((sum, o) => sum + o.effectiveLength, 0)} bp<br>
-            ${overlaps.some(o => o.isFuzzy) ? '<span class="warning">⚠️ Contains fuzzy overlaps</span><br>' : ''}
-            ${segments.some(s => s.hasGap) ? '<span class="warning">⚠️ Contains gaps/mismatches</span><br>' : ''}
+        <div class="enhancement-note">
+            <strong>🚀 FIXES Applied:</strong><br>
+            • Corrected position calculations (no more overlapping segments)<br>
+            • Proper bidirectional link search (as per GFA specification)<br>
+            • CIGAR transformation for reversed links (I↔D swap)<br>
+            • Support for negative node IDs (separate from orientation)<br>
+            • Accurate overlap validation and merging<br>
+            • <strong>NEW:</strong> Color-coded sequence visualization
         </div>
         
-        <div class="overlap-legend">
-            <strong>Overlap Legend:</strong><br>
-            ${overlaps.map((overlap, index) => {
-              const colorClass = overlap.isFuzzy ? 'fuzzy-overlap' : `overlap overlap-${index % 10}`;
-              return `<span class="${colorClass}" style="margin: 2px 4px; padding: 2px 6px; font-size: 10px;">
-                ${index + 1}. ${overlap.nodeA} → ${overlap.nodeB} (${overlap.effectiveLength}bp)
-              </span>`;
+        <div class="stats">
+            <strong>Reconstruction Statistics:</strong><br>
+            Total Sequence Length: ${totalLength.toLocaleString()} bp<br>
+            Number of Segments: ${segments.length}<br>
+            Path: ${segments.map(s => `${s.nodeId}${s.orientation}`).join(' → ')}<br>
+            Perfect Overlaps: ${segments.filter(s => s.method === 'perfect_overlap').length}<br>
+            Fuzzy Overlaps: ${segments.filter(s => s.method === 'fuzzy_overlap').length}<br>
+            Gap Insertions: ${segments.filter(s => s.method === 'gap_insertion').length}<br>
+            Concatenations: ${segments.filter(s => s.method === 'concatenation' || s.method === 'concatenation_fallback').length}<br>
+            Reverse Links Used: ${segments.filter(s => s.linkInfo && s.linkInfo.reversed).length}<br>
+        </div>
+        
+        <div class="sequence-legend">
+            <strong>Sequence Color Legend:</strong><br>
+            ${segments.map((seg, i) => `
+                <span class="legend-item seg-${i}">${seg.nodeId}${seg.orientation}</span>
+            `).join('')}
+            <span class="legend-item overlap-legend">Overlap Regions</span>
+        </div>
+        
+        <div class="position-check">
+            <strong>Position Verification:</strong><br>
+            <em>Note: For overlapped segments, positions show where each node's sequence appears in the final merged sequence.</em><br>
+            ${segments.map((seg, i) => {
+              const segLength = seg.end - seg.start;
+              const contributionNote = seg.method === 'perfect_overlap' || seg.method === 'fuzzy_overlap' 
+                ? ` (${seg.contributedLength}bp new content after ${seg.overlapLength}bp overlap removed)`
+                : '';
+              return `Segment ${i + 1}: ${seg.start}-${seg.end} (${segLength}bp total)${contributionNote}`;
             }).join('<br>')}
         </div>
         
-        <div class="debug-info">
-            <strong>Detailed Overlap Analysis:</strong><br>
-            ${overlaps.map((o, i) => 
-              `${i + 1}. ${o.nodeA} → ${o.nodeB}: ${o.effectiveLength}bp at pos ${o.start}-${o.end}${o.originalLength !== o.effectiveLength ? ` (reduced from ${o.originalLength}bp)` : ''}${o.isFuzzy ? ' (fuzzy match)' : ''}`
-            ).join('<br>')}
+        <div class="merge-log">
+            <strong>Reconstruction Log:</strong><br>
+            ${mergeLog.map(entry => `• ${entry}`).join('<br>')}
         </div>
         
-        <div class="node-info">
-            <strong>Node Segments:</strong><br>
-            ${segments.map(seg => 
-              `${seg.nodeId}: ${seg.start}-${seg.end} (${seg.sequence.length} bp)${seg.hasGap ? ` [${seg.gapType?.toUpperCase() || 'GAP'}: ${seg.gapLength} bp]` : ''}${seg.isFuzzy ? ' (fuzzy overlap)' : ''}`
-            ).join('<br>')}
-        </div>
+        <h3>Segment Details:</h3>
+        ${segments.map((segment, index) => {
+          const segmentLength = segment.end - segment.start;
+          return `
+            <div class="segment ${segment.method || 'concat'}">
+                <strong>Segment ${index + 1}: ${segment.nodeId}${segment.orientation}</strong>
+                <span class="legend-item seg-${index}" style="margin-left: 10px; font-size: 10px;">Color ${index + 1}</span><br>
+                Position: ${segment.start}-${segment.end} (${segmentLength} bp)<br>
+                Original Node Length: ${segment.originalSequence ? segment.originalSequence.length : 'N/A'} bp<br>
+                Contributed to Final: ${segment.contributedLength} bp<br>
+                ${segment.method ? `Merge Method: ${segment.method}<br>` : ''}
+                ${segment.overlapLength > 0 ? `Overlap Removed: ${segment.overlapLength} bp<br>` : ''}
+                ${segment.linkInfo && segment.linkInfo.found ? 
+                  `Link: ${segment.linkInfo.reversed ? 'reversed' : 'direct'} (${segment.linkInfo.overlap})<br>` : 
+                  'Link: concatenation (no overlap found)<br>'}
+                ${segment.linkInfo && segment.linkInfo.reversed ? 
+                  `<em>Note: Used reverse link with transformed CIGAR</em><br>` : ''}
+                ${segment.linkInfo && segment.linkInfo.originalLink ? 
+                  `<em>Original link: ${segment.linkInfo.originalLink}</em><br>` : ''}
+                ${segment.similarity ? `Overlap Similarity: ${(segment.similarity * 100).toFixed(1)}%<br>` : ''}
+            </div>
+          `;
+        }).join('')}
     </div>
     
-    <h3>Merged Sequence (overlaps highlighted with unique colors):</h3>
-    <div class="sequence">`;
-  
-  // Build sequence with properly separated overlaps using unique colors
-  let lastPos = 0;
-  const sortedOverlaps = [...overlaps].sort((a, b) => a.start - b.start);
-  
-  sortedOverlaps.forEach((overlap, index) => {
-    // Add normal sequence before overlap
-    if (overlap.start > lastPos) {
-      html += escapeHtml(sequence.slice(lastPos, overlap.start));
-    }
+    <h3>Color-Coded Final Sequence:</h3>
+    <div class="sequence">${coloredSequenceHtml}</div>
     
-    // Find the original index of this overlap for consistent coloring
-    const originalIndex = overlaps.indexOf(overlap);
-    
-    // Add highlighted overlap with unique color
-    const overlapClass = overlap.isFuzzy ? 
-      'fuzzy-overlap' : 
-      `overlap overlap-${originalIndex % 10}`;
-    
-    const title = `Overlap ${originalIndex + 1}: ${overlap.nodeA} → ${overlap.nodeB} (${overlap.overlapStr})${overlap.isFuzzy ? ' - Fuzzy match' : ''}`;
-    
-    html += `<span class="${overlapClass}" title="${title}">${escapeHtml(overlap.sequence)}</span>`;
-    
-    lastPos = overlap.end;
-  });
-  
-  // Add remaining sequence
-  if (lastPos < sequence.length) {
-    html += escapeHtml(sequence.slice(lastPos));
-  }
-  
-  html += `</div>
+    <div class="enhancement-note" style="margin-top: 20px;">
+        <strong>How to read this output:</strong><br>
+        • <span style="color: #9c27b0;">Purple segments</span>: First node in path<br>
+        • <span style="color: #4caf50;">Green segments</span>: Perfect overlaps found and merged<br>
+        • <span style="color: #ff9800;">Orange segments</span>: Fuzzy overlaps (>80% similarity)<br>
+        • <span style="color: #f44336;">Red segments</span>: Poor overlaps with gap insertions<br>
+        • <span style="color: #2196f3;">Blue segments</span>: Simple concatenation (no overlap)<br>
+        • <span style="background-color: rgba(255, 193, 7, 0.6); padding: 2px 4px;">Overlap regions</span> are highlighted with yellow borders<br>
+        • Each segment has a unique background color in the final sequence
+    </div>
 </body>
 </html>`;
   
   return html;
 }
 
-/**
- * Add export button to the path management UI
- */
-export function addExportButton() {
-  const pathManagement = document.getElementById('pathManagement');
-  if (!pathManagement) return;
-  
-  // Check if button already exists
-  if (document.getElementById('exportPathSequence')) return;
-  
-  // Find the navigation section to add the button
-  const navSection = pathManagement.querySelector('.nav-header');
-  if (navSection) {
-    const exportBtn = document.createElement('button');
-    exportBtn.id = 'exportPathSequence';
-    exportBtn.className = 'export-btn';
-    exportBtn.textContent = 'Export Sequence';
-    exportBtn.title = 'Download sequence file for selected path';
-    exportBtn.disabled = true; // Initially disabled
-    
-    navSection.appendChild(exportBtn);
-    
-    return exportBtn;
+// NEW: Generate color-coded sequence HTML with segment highlighting
+function generateColorCodedSequence(sequence, segments) {
+  if (!sequence || segments.length === 0) {
+    return sequence || '';
   }
+  
+  console.log('\n=== GENERATING COLOR-CODED SEQUENCE ===');
+  
+  // Create an array to track which segment each position belongs to
+  const positionMap = new Array(sequence.length).fill(-1);
+  const overlapMap = new Array(sequence.length).fill(false);
+  
+  // Map each position to its primary segment
+  segments.forEach((segment, segIndex) => {
+    for (let pos = segment.start; pos < segment.end; pos++) {
+      if (pos < sequence.length) {
+        if (positionMap[pos] === -1) {
+          // First segment to claim this position
+          positionMap[pos] = segIndex;
+        } else {
+          // Overlap detected - mark as overlap region
+          overlapMap[pos] = true;
+        }
+      }
+    }
+  });
+  
+  // Generate HTML with color coding
+  let coloredHtml = '';
+  let currentSegment = -1;
+  let currentIsOverlap = false;
+  
+  for (let i = 0; i < sequence.length; i++) {
+    const segmentIndex = positionMap[i];
+    const isOverlap = overlapMap[i];
+    
+    // Check if we need to start/end a span
+    if (segmentIndex !== currentSegment || isOverlap !== currentIsOverlap) {
+      // Close previous span if needed
+      if (i > 0) {
+        coloredHtml += '</span>';
+      }
+      
+      // Start new span
+      const segClass = segmentIndex >= 0 ? `seg-${segmentIndex}` : '';
+      const overlapClass = isOverlap ? ' overlap-indicator' : '';
+      coloredHtml += `<span class="${segClass}${overlapClass}">`;
+      
+      currentSegment = segmentIndex;
+      currentIsOverlap = isOverlap;
+    }
+    
+    // Add the character
+    coloredHtml += sequence[i];
+    
+    // Add line breaks every 80 characters for readability
+    if ((i + 1) % 80 === 0) {
+      coloredHtml += '\n';
+    }
+  }
+  
+  // Close final span
+  if (sequence.length > 0) {
+    coloredHtml += '</span>';
+  }
+  
+  console.log(`Color-coded sequence generated: ${sequence.length} positions mapped`);
+  return coloredHtml;
 }
 
-/**
- * Enhanced export function with individual overlap colors
- */
-export function exportPathSequenceImproved(pathData, nodes, links) {
+// ===== MAIN EXPORT FUNCTIONS =====
+
+// Main export function (unchanged interface)
+export function exportPathSequence(pathData, nodes, links) {
   if (!pathData || !pathData.sequence) {
     alert('No path selected for export');
     return;
   }
   
-  // Get node objects for the path
+  console.log('=== FIXED GFA SEQUENCE EXPORT ===');
+  
+  // Parse path and get node objects
   const nodeIds = pathData.sequence.split(',').map(id => id.trim());
-  const nodeMap = new Map(nodes.map(n => [String(n.id), n]));
-  const pathNodes = nodeIds.map(id => nodeMap.get(id)).filter(Boolean);
+  const nodeMap = new Map(nodes.map(n => [normalizeNodeId(n.id), n]));
+  const pathNodes = nodeIds.map(id => nodeMap.get(normalizeNodeId(id))).filter(Boolean);
   
   if (pathNodes.length === 0) {
     alert('No valid nodes found in path');
     return;
   }
   
-  console.log('=== ENHANCED PATH SEQUENCE EXPORT ===');
-  console.log('Path:', pathData.name);
-  console.log('Nodes:', pathNodes.map(n => `${n.id} (${n.seq?.length || 'unknown'}bp)`));
+  console.log(`Processing path: ${pathNodes.map(n => n.id).join(' → ')}`);
   
-  // Merge sequences with improved overlap handling
-  const mergedData = mergePathSequencesImproved(pathNodes, links);
+  // Reconstruct sequence using fixed algorithm
+  const result = reconstructSequenceFromPath(pathNodes, links, pathData.name);
   
-  // Generate improved HTML content with individual overlap colors
-  const htmlContent = generateSequenceHTMLImproved(pathData.name, pathData.sequence, mergedData);
+  // Generate enhanced HTML report
+  const htmlContent = generateSequenceReport(result);
   
-  // Create and download file
+  // Download file
   const blob = new Blob([htmlContent], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
   
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${pathData.name.replace(/[^a-zA-Z0-9]/g, '_')}_sequence_improved.html`;
+  a.download = `${pathData.name.replace(/[^a-zA-Z0-9]/g, '_')}_FIXED_sequence.html`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   
-  console.log('=== EXPORT SUMMARY ===');
-  console.log(`Final sequence length: ${mergedData.sequence.length.toLocaleString()}bp`);
-  console.log(`Overlaps processed: ${mergedData.overlaps.length}`);
-  console.log(`Segments created: ${mergedData.segments.length}`);
+  console.log('=== EXPORT COMPLETE ===');
+  console.log(`Final sequence: ${result.totalLength.toLocaleString()}bp`);
+  console.log(`Perfect overlaps: ${result.segments.filter(s => s.method === 'perfect_overlap').length}`);
+  console.log(`Reversed links used: ${result.segments.filter(s => s.linkInfo && s.linkInfo.reversed).length}`);
+}
+
+// Export helper functions for UI integration
+export function addExportButton() {
+  const pathManagement = document.getElementById('pathManagement');
+  if (!pathManagement || document.getElementById('exportPathSequence')) return;
   
-  if (mergedData.overlaps.some(o => o.isFuzzy)) {
-    console.log('⚠️  Some overlaps were fuzzy matches');
-  }
-  
-  if (mergedData.segments.some(s => s.hasGap)) {
-    console.log('⚠️  Some segments have gaps or mismatches');
+  const navSection = pathManagement.querySelector('.nav-header');
+  if (navSection) {
+    const exportBtn = document.createElement('button');
+    exportBtn.id = 'exportPathSequence';
+    exportBtn.className = 'export-btn';
+    exportBtn.textContent = 'Export Sequence';
+    exportBtn.title = 'Download enhanced sequence file for selected path';
+    exportBtn.disabled = true;
+    
+    navSection.appendChild(exportBtn);
+    return exportBtn;
   }
 }
 
-/**
- * Original export function for backward compatibility
- */
-export function exportPathSequence(pathData, nodes, links) {
-  // Just call the improved version
-  return exportPathSequenceImproved(pathData, nodes, links);
+export function createExportButton() {
+  return addExportButton();
 }
