@@ -1,8 +1,8 @@
-// sequence-exporter.js - FIXED: Proper GFA specification implementation
+// sequence-exporter.js - FIXED: Complete GFA specification implementation with bidirectional links
 
 /**
  * Enhanced GFA sequence reconstruction following the specification document
- * FIXES: Position calculations, bidirectional search, CIGAR transformation
+ * FIXES: Position calculations, bidirectional search, CIGAR transformation, hub topology support
  */
 
 // ===== UTILITY FUNCTIONS =====
@@ -49,7 +49,7 @@ function parseCigarOverlap(cigarString) {
   return { length: totalLength, operations };
 }
 
-// FIXED: Transform CIGAR for reversed links (swap I↔D as per document)
+// FIXED: Transform CIGAR for reversed links (swap I↔D as per GFA spec)
 function transformCigarForReverse(cigarString) {
   if (!cigarString || cigarString === '*') return cigarString;
   
@@ -63,13 +63,109 @@ function normalizeNodeId(nodeId) {
   return String(nodeId).trim();
 }
 
-// CORRECT: Follow GFA links exactly - find the natural path flow in the GFA
-function determinePathOrientations(pathNodes, links) {
-  if (pathNodes.length <= 1) {
-    return { orientations: ['+'], nodes: pathNodes, reversed: false };
+// Get the opposite orientation
+function getOppositeOrientation(orientation) {
+  return orientation === '+' ? '-' : '+';
+}
+
+// ===== ENHANCED BIDIRECTIONAL LINK FINDING =====
+
+// ENHANCED: Find exact GFA link with bidirectional support
+function findLinkBetweenNodes(nodeAId, nodeBId, links, nodeAOri = '+', nodeBOri = '+') {
+  console.log(`\n=== BIDIRECTIONAL LINK SEARCH: ${nodeAId}${nodeAOri} → ${nodeBId}${nodeBOri} ===`);
+  
+  const normalizedA = normalizeNodeId(nodeAId);
+  const normalizedB = normalizeNodeId(nodeBId);
+  
+  // Method 1: Direct link (A → B)
+  console.log(`Searching for direct link: ${normalizedA}${nodeAOri} → ${normalizedB}${nodeBOri}`);
+  
+  for (const link of links) {
+    const sourceId = normalizeNodeId(link.source.id || link.source);
+    const targetId = normalizeNodeId(link.target.id || link.target);
+    const srcOri = link.srcOrientation || '+';
+    const tgtOri = link.tgtOrientation || '+';
+    
+    if (sourceId === normalizedA && targetId === normalizedB && 
+        srcOri === nodeAOri && tgtOri === nodeBOri) {
+      console.log(`  ✓ Found direct link: L ${sourceId} ${srcOri} ${targetId} ${tgtOri} ${link.overlap || '*'}`);
+      return {
+        found: true,
+        method: 'direct',
+        overlap: link.overlap || '0M',
+        sourceOrientation: srcOri,
+        targetOrientation: tgtOri,
+        link: link,
+        reversed: false
+      };
+    }
   }
   
-  console.log(`\n=== FINDING NATURAL GFA PATH ===`);
+  // Method 2: Bidirectional equivalent link (B → A with orientation transformation)
+  console.log(`Searching for bidirectional equivalent: ${normalizedB} → ${normalizedA}`);
+  
+  for (const link of links) {
+    const sourceId = normalizeNodeId(link.source.id || link.source);
+    const targetId = normalizeNodeId(link.target.id || link.target);
+    const srcOri = link.srcOrientation || '+';
+    const tgtOri = link.tgtOrientation || '+';
+    
+    if (sourceId === normalizedB && targetId === normalizedA) {
+      console.log(`  Found reverse link: ${sourceId}${srcOri} → ${targetId}${tgtOri} [${link.overlap || '*'}]`);
+      
+      // Apply GFA bidirectional transformation rules
+      // For link B(srcOri) → A(tgtOri), the equivalent A → B connection is:
+      // A(opposite_of_tgtOri) → B(opposite_of_srcOri)
+      
+      const equivalentAOri = getOppositeOrientation(tgtOri);
+      const equivalentBOri = getOppositeOrientation(srcOri);
+      
+      console.log(`  Equivalent would be: ${normalizedA}${equivalentAOri} → ${normalizedB}${equivalentBOri}`);
+      console.log(`  We want: ${normalizedA}${nodeAOri} → ${normalizedB}${nodeBOri}`);
+      
+      if (equivalentAOri === nodeAOri && equivalentBOri === nodeBOri) {
+        console.log(`  ✓ BIDIRECTIONAL MATCH: Using transformed link`);
+        
+        // Transform the CIGAR string for reversed direction
+        const transformedCigar = transformCigarForReverse(link.overlap || '0M');
+        
+        return {
+          found: true,
+          method: 'bidirectional',
+          overlap: transformedCigar,
+          sourceOrientation: nodeAOri,
+          targetOrientation: nodeBOri,
+          link: link,
+          reversed: true,
+          originalOverlap: link.overlap || '0M',
+          originalLink: `L ${sourceId} ${srcOri} ${targetId} ${tgtOri}`
+        };
+      } else {
+        console.log(`  ✗ Bidirectional orientation mismatch`);
+      }
+    }
+  }
+  
+  console.log(`  ❌ NO COMPATIBLE LINK FOUND`);
+  return {
+    found: false,
+    method: 'none',
+    overlap: '0M',
+    sourceOrientation: nodeAOri,
+    targetOrientation: nodeBOri,
+    reversed: false
+  };
+}
+
+// ===== INTELLIGENT PATH DIRECTION DETECTION =====
+
+// NEW: Detect natural path direction based on GFA link topology
+function determinePathOrientations(pathNodes, links) {
+  if (pathNodes.length <= 1) {
+    return { orientations: ['+'], nodes: pathNodes, reversed: false, topology: 'single' };
+  }
+  
+  console.log(`\n=== ANALYZING PATH TOPOLOGY ===`);
   console.log(`Input nodes: ${pathNodes.map(n => n.id).join(', ')}`);
   
   // Create a set of input node IDs for lookup
@@ -95,35 +191,158 @@ function determinePathOrientations(pathNodes, links) {
   });
   
   if (relevantLinks.length === 0) {
-    console.log(`⚠️ No GFA links found between input nodes`);
-    return { orientations: new Array(pathNodes.length).fill('+'), nodes: pathNodes, reversed: false };
-  }
-  
-  // Build the natural path following GFA link directions
-  const gfaPath = buildNaturalGfaPath(relevantLinks, pathNodes);
-  
-  if (gfaPath.success) {
-    console.log(`\n✓ FOUND NATURAL GFA PATH:`);
-    for (let i = 0; i < gfaPath.nodes.length; i++) {
-      console.log(`  ${gfaPath.nodes[i].id}${gfaPath.orientations[i]}`);
-    }
-    
-    return {
-      orientations: gfaPath.orientations,
-      nodes: gfaPath.nodes,
-      reversed: gfaPath.reversed
+    console.log(`⚠️ No GFA links found between input nodes - using default orientations`);
+    return { 
+      orientations: new Array(pathNodes.length).fill('+'), 
+      nodes: pathNodes, 
+      reversed: false,
+      topology: 'disconnected'
     };
   }
   
-  console.log(`⚠️ Could not build natural GFA path - using input order with default orientations`);
-  return { orientations: new Array(pathNodes.length).fill('+'), nodes: pathNodes, reversed: false };
+  // Analyze topology
+  const topology = analyzePathTopology(pathNodes, relevantLinks);
+  console.log(`Detected topology: ${topology.type}`);
+  
+  if (topology.type === 'hub') {
+    console.log(`⚠️ WARNING: Hub topology detected - this path may not be valid as a linear sequence`);
+    console.log(`Hub node: ${topology.hubNode}, connected to: ${topology.leaves.join(', ')}`);
+    
+    // For hub topology, try to create the best possible linear path
+    const linearPath = createLinearPathFromHub(topology, pathNodes, relevantLinks);
+    if (linearPath.success) {
+      return linearPath;
+    }
+  }
+  
+  // Try to build linear path
+  const linearPath = buildLinearPath(relevantLinks, pathNodes);
+  
+  if (linearPath.success) {
+    console.log(`\n✓ FOUND VALID LINEAR PATH:`);
+    for (let i = 0; i < linearPath.nodes.length; i++) {
+      console.log(`  ${linearPath.nodes[i].id}${linearPath.orientations[i]}`);
+    }
+    
+    return linearPath;
+  }
+  
+  console.log(`⚠️ Could not build valid linear path - using input order with smart orientations`);
+  return createFallbackPath(pathNodes, relevantLinks);
 }
 
-// NEW: Build path following natural GFA link flow
-function buildNaturalGfaPath(relevantLinks, inputNodes) {
-  console.log(`\n--- BUILDING NATURAL GFA PATH ---`);
+// NEW: Analyze the topology of the path
+function analyzePathTopology(pathNodes, relevantLinks) {
+  const nodeConnections = new Map();
   
-  // Find the starting node (node with no incoming edges from our set, or try each node)
+  // Initialize connection counts
+  pathNodes.forEach(node => {
+    const nodeId = normalizeNodeId(node.id);
+    nodeConnections.set(nodeId, { incoming: 0, outgoing: 0, connections: [] });
+  });
+  
+  // Count connections for each node
+  relevantLinks.forEach(link => {
+    const source = nodeConnections.get(link.sourceId);
+    const target = nodeConnections.get(link.targetId);
+    
+    if (source) {
+      source.outgoing++;
+      source.connections.push({ type: 'out', to: link.targetId, link });
+    }
+    if (target) {
+      target.incoming++;
+      target.connections.push({ type: 'in', from: link.sourceId, link });
+    }
+  });
+  
+  // Analyze topology
+  const sourceNodes = []; // nodes with only outgoing edges
+  const sinkNodes = [];   // nodes with only incoming edges
+  const hubNodes = [];    // nodes with multiple connections
+  const linearNodes = []; // nodes with 1 in + 1 out
+  
+  for (const [nodeId, conn] of nodeConnections) {
+    if (conn.incoming === 0 && conn.outgoing > 0) {
+      sourceNodes.push(nodeId);
+    } else if (conn.outgoing === 0 && conn.incoming > 0) {
+      sinkNodes.push(nodeId);
+    } else if (conn.incoming + conn.outgoing > 2) {
+      hubNodes.push(nodeId);
+    } else if (conn.incoming === 1 && conn.outgoing === 1) {
+      linearNodes.push(nodeId);
+    }
+  }
+  
+  // Determine topology type
+  if (hubNodes.length > 0) {
+    const hubNode = hubNodes[0];
+    const hubConnections = nodeConnections.get(hubNode);
+    const leaves = hubConnections.connections
+      .filter(c => c.type === 'out')
+      .map(c => c.to);
+    
+    return {
+      type: 'hub',
+      hubNode: hubNode,
+      leaves: leaves,
+      sourceNodes: sourceNodes,
+      sinkNodes: sinkNodes
+    };
+  } else if (sourceNodes.length === 1 && sinkNodes.length === 1) {
+    return {
+      type: 'linear',
+      start: sourceNodes[0],
+      end: sinkNodes[0],
+      sourceNodes: sourceNodes,
+      sinkNodes: sinkNodes
+    };
+  } else {
+    return {
+      type: 'complex',
+      sourceNodes: sourceNodes,
+      sinkNodes: sinkNodes,
+      linearNodes: linearNodes
+    };
+  }
+}
+
+// NEW: Create linear path from hub topology
+function createLinearPathFromHub(topology, pathNodes, relevantLinks) {
+  if (topology.type !== 'hub') {
+    return { success: false };
+  }
+  
+  console.log(`\n--- CREATING LINEAR PATH FROM HUB ---`);
+  
+  const hubNode = pathNodes.find(n => normalizeNodeId(n.id) === topology.hubNode);
+  const leafNodes = pathNodes.filter(n => topology.leaves.includes(normalizeNodeId(n.id)));
+  
+  if (!hubNode || leafNodes.length !== 2) {
+    return { success: false };
+  }
+  
+  // Try hub in the middle: leaf1 → hub → leaf2
+  const possiblePaths = [
+    [leafNodes[0], hubNode, leafNodes[1]],
+    [leafNodes[1], hubNode, leafNodes[0]]
+  ];
+  
+  for (const pathOrder of possiblePaths) {
+    const result = buildLinearPath(relevantLinks, pathOrder);
+    if (result.success) {
+      console.log(`✓ Successfully created linear path from hub topology`);
+      return result;
+    }
+  }
+  
+  return { success: false };
+}
+
+// NEW: Build linear path following GFA link directions
+function buildLinearPath(relevantLinks, inputNodes) {
+  console.log(`\n--- BUILDING LINEAR PATH ---`);
+  
   const nodeMap = new Map(inputNodes.map(n => [normalizeNodeId(n.id), n]));
   const inputNodeIds = Array.from(nodeMap.keys());
   
@@ -148,7 +367,8 @@ function buildNaturalGfaPath(relevantLinks, inputNodes) {
           success: true,
           nodes: path.nodes,
           orientations: path.orientations,
-          reversed: isReversed
+          reversed: isReversed,
+          topology: 'linear'
         };
       }
     }
@@ -174,7 +394,7 @@ function buildPathFromStart(startNodeId, startOri, relevantLinks, nodeMap) {
     
     let foundNext = false;
     
-    // Look for a link that starts from current node with current orientation
+    // Look for a direct link that starts from current node with current orientation
     for (const link of relevantLinks) {
       if (link.sourceId === currentNodeId && 
           link.sourceOrientation === currentOri && 
@@ -197,6 +417,31 @@ function buildPathFromStart(startNodeId, startOri, relevantLinks, nodeMap) {
       }
     }
     
+    // If no direct link found, try bidirectional search
+    if (!foundNext) {
+      for (const link of relevantLinks) {
+        if (link.targetId === currentNodeId && 
+            getOppositeOrientation(link.targetOrientation) === currentOri && 
+            !path.usedNodes.has(link.sourceId)) {
+          
+          // Found bidirectional link
+          const nextNode = nodeMap.get(link.sourceId);
+          const nextOri = getOppositeOrientation(link.sourceOrientation);
+          
+          console.log(`      ✓ Found bidirectional: ${currentNodeId}${currentOri} → ${link.sourceId}${nextOri} (${link.overlap})`);
+          
+          path.nodes.push(nextNode);
+          path.orientations.push(nextOri);
+          path.usedNodes.add(link.sourceId);
+          
+          currentNodeId = link.sourceId;
+          currentOri = nextOri;
+          foundNext = true;
+          break;
+        }
+      }
+    }
+    
     if (!foundNext) {
       console.log(`      ✗ No valid next link found`);
       break;
@@ -210,76 +455,40 @@ function buildPathFromStart(startNodeId, startOri, relevantLinks, nodeMap) {
   };
 }
 
-// ENHANCED: Find exact link with specific orientations (no more guessing!)
-function findExactGfaLink(nodeAId, nodeBId, nodeAOri, nodeBOri, links) {
-  const normalizedA = normalizeNodeId(nodeAId);
-  const normalizedB = normalizeNodeId(nodeBId);
+// NEW: Create fallback path when no valid linear path is found
+function createFallbackPath(pathNodes, relevantLinks) {
+  console.log(`\n--- CREATING FALLBACK PATH ---`);
   
-  console.log(`Looking for exact GFA link: ${normalizedA}${nodeAOri} → ${normalizedB}${nodeBOri}`);
+  // Use input order but try to determine smart orientations
+  const orientations = [];
   
-  // Look for direct link
-  for (const link of links) {
-    const sourceId = normalizeNodeId(link.source.id || link.source);
-    const targetId = normalizeNodeId(link.target.id || link.target);
-    const srcOri = link.srcOrientation || '+';
-    const tgtOri = link.tgtOrientation || '+';
+  for (let i = 0; i < pathNodes.length; i++) {
+    const nodeId = normalizeNodeId(pathNodes[i].id);
     
-    if (sourceId === normalizedA && targetId === normalizedB && 
-        srcOri === nodeAOri && tgtOri === nodeBOri) {
-      console.log(`  ✓ Found direct link: L ${sourceId} ${srcOri} ${targetId} ${tgtOri} ${link.overlap || '*'}`);
-      return {
-        found: true,
-        reversed: false,
-        overlap: link.overlap || '0M',
-        sourceOrientation: srcOri,
-        targetOrientation: tgtOri,
-        link: link
-      };
-    }
-  }
-  
-  // Look for reverse link that we can transform
-  for (const link of links) {
-    const sourceId = normalizeNodeId(link.source.id || link.source);
-    const targetId = normalizeNodeId(link.target.id || link.target);
-    const srcOri = link.srcOrientation || '+';
-    const tgtOri = link.tgtOrientation || '+';
+    // Look for any links involving this node to determine best orientation
+    const nodeLinks = relevantLinks.filter(link => 
+      link.sourceId === nodeId || link.targetId === nodeId
+    );
     
-    // Check if this is our link in reverse: B → A
-    if (sourceId === normalizedB && targetId === normalizedA) {
-      // Transform the orientations to see if they match our needs
-      const transformedSrcOri = (srcOri === '+') ? '-' : '+';
-      const transformedTgtOri = (tgtOri === '+') ? '-' : '+';
+    if (nodeLinks.length > 0) {
+      // Use the most common orientation for this node
+      const positiveCount = nodeLinks.filter(link => 
+        (link.sourceId === nodeId && link.sourceOrientation === '+') ||
+        (link.targetId === nodeId && link.targetOrientation === '+')
+      ).length;
       
-      if (transformedTgtOri === nodeAOri && transformedSrcOri === nodeBOri) {
-        console.log(`  ✓ Found reverse link: L ${sourceId} ${srcOri} ${targetId} ${tgtOri} ${link.overlap || '*'}`);
-        console.log(`    Transforms to: ${normalizedA}${nodeAOri} → ${normalizedB}${nodeBOri}`);
-        
-        return {
-          found: true,
-          reversed: true,
-          overlap: transformCigarForReverse(link.overlap || '0M'),
-          sourceOrientation: nodeAOri,
-          targetOrientation: nodeBOri,
-          link: link,
-          originalLink: `L ${sourceId} ${srcOri} ${targetId} ${tgtOri}`
-        };
-      }
+      orientations.push(positiveCount >= nodeLinks.length / 2 ? '+' : '-');
+    } else {
+      orientations.push('+'); // Default
     }
   }
   
-  console.log(`  ✗ No link found for ${normalizedA}${nodeAOri} → ${normalizedB}${nodeBOri}`);
   return {
-    found: false,
+    orientations: orientations,
+    nodes: pathNodes,
     reversed: false,
-    overlap: '0M',
-    sourceOrientation: nodeAOri,
-    targetOrientation: nodeBOri
+    topology: 'fallback'
   };
-}
-// UPDATED: Use exact GFA link finding instead of guessing
-function findLinkBetweenNodes(nodeAId, nodeBId, links, nodeAOri = '+', nodeBOri = '+') {
-  return findExactGfaLink(nodeAId, nodeBId, nodeAOri, nodeBOri, links);
 }
 
 // ===== SEQUENCE PROCESSING FUNCTIONS =====
@@ -307,7 +516,7 @@ function mergeSequencesWithOverlap(currentSequence, newNodeSeq, overlapInfo, nod
   console.log(`\n--- MERGING SEQUENCES ---`);
   console.log(`Current total sequence: ${currentSequence.length}bp`);
   console.log(`New node (${nodeBId}): ${newNodeSeq.length}bp`);
-  console.log(`Overlap info: ${overlapInfo.overlap} (reversed: ${overlapInfo.reversed})`);
+  console.log(`Overlap info: ${overlapInfo.overlap} (method: ${overlapInfo.method})`);
   
   const { length: overlapLength } = parseCigarOverlap(overlapInfo.overlap);
   const currentSeqLength = currentSequence.length;
@@ -337,7 +546,7 @@ function mergeSequencesWithOverlap(currentSequence, newNodeSeq, overlapInfo, nod
     };
   }
   
-  // FIXED: Get overlap regions from the END of current sequence and START of new sequence
+  // Get overlap regions from the END of current sequence and START of new sequence
   const currentSuffix = currentSequence.slice(-overlapLength);
   const newPrefix = newNodeSeq.slice(0, overlapLength);
   
@@ -351,7 +560,6 @@ function mergeSequencesWithOverlap(currentSequence, newNodeSeq, overlapInfo, nod
     const mergedSeq = currentSequence + nonOverlappingPart;
     
     // CORRECTED: For overlaps, the new segment starts where the overlap begins in the current sequence
-    // This ensures no position gaps or overlaps in the segment display
     const segmentStart = currentSeqLength - overlapLength;
     const segmentEnd = mergedSeq.length;
     
@@ -382,7 +590,6 @@ function mergeSequencesWithOverlap(currentSequence, newNodeSeq, overlapInfo, nod
       const nonOverlappingPart = newNodeSeq.slice(overlapLength);
       const mergedSeq = currentSequence + nonOverlappingPart;
       
-      // CORRECTED: Same fix for fuzzy overlaps
       const segmentStart = currentSeqLength - overlapLength;
       const segmentEnd = mergedSeq.length;
       
@@ -422,7 +629,7 @@ function mergeSequencesWithOverlap(currentSequence, newNodeSeq, overlapInfo, nod
 
 // ENHANCED: Reconstruct sequence with automatic path direction detection
 function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed Path') {
-  console.log(`\n=== SEQUENCE RECONSTRUCTION: ${pathName} ===`);
+  console.log(`\n=== ENHANCED SEQUENCE RECONSTRUCTION: ${pathName} ===`);
   console.log(`Input path: ${pathNodes.map(n => n.id).join(' → ')}`);
   
   if (pathNodes.length === 0) {
@@ -457,6 +664,7 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
   const actualNodes = pathInfo.nodes;
   const nodeOrientations = pathInfo.orientations;
   const pathReversed = pathInfo.reversed;
+  const topology = pathInfo.topology;
   
   if (pathReversed) {
     console.log(`✓ Using REVERSE path direction to match GFA links`);
@@ -464,11 +672,13 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
     console.log(`✓ Using FORWARD path direction as provided`);
   }
   
+  console.log(`Detected topology: ${topology}`);
   console.log(`Final path: ${actualNodes.map((n, i) => `${n.id}${nodeOrientations[i]}`).join(' → ')}`);
   
   let currentSequence = '';
   const segments = [];
   const mergeLog = [];
+  const linkResults = []; // Track link search results for analysis
   
   // Start with first node using determined orientation
   const firstNodeOri = nodeOrientations[0];
@@ -499,15 +709,26 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
     console.log(`\n=== PROCESSING STEP ${i}: ${prevNode.id}${prevNodeOri} → ${currentNode.id}${currentNodeOri} ===`);
     console.log(`Current total sequence length: ${currentSequence.length}bp`);
     
-    // Find the exact link using the determined orientations
-    const linkInfo = findExactGfaLink(prevNode.id, currentNode.id, prevNodeOri, currentNodeOri, links);
+    // Find link using enhanced bidirectional search
+    const linkInfo = findLinkBetweenNodes(prevNode.id, currentNode.id, links, prevNodeOri, currentNodeOri);
+    
+    // Store link result for analysis
+    linkResults.push({
+      step: i,
+      from: `${prevNode.id}${prevNodeOri}`,
+      to: `${currentNode.id}${currentNodeOri}`,
+      found: linkInfo.found,
+      method: linkInfo.method,
+      overlap: linkInfo.overlap,
+      reversed: linkInfo.reversed
+    });
     
     // Get current node sequence in determined orientation
     const currentNodeSeq = getNodeSequence(currentNode, currentNodeOri);
     console.log(`Node ${currentNode.id}${currentNodeOri}: ${currentNodeSeq.length}bp`);
     
     if (linkInfo.found) {
-      console.log(`✓ Found link: ${linkInfo.overlap}${linkInfo.reversed ? ' (reversed)' : ''}`);
+      console.log(`✓ Found link: ${linkInfo.overlap}${linkInfo.reversed ? ' (bidirectional)' : ' (direct)'}`);
     } else {
       console.log(`✗ No link found - using concatenation`);
     }
@@ -540,9 +761,13 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
       similarity: mergeResult.similarity
     });
     
+    const methodDesc = linkInfo.found ? 
+      `${mergeResult.method}${linkInfo.reversed ? ' (bidirectional)' : ''}` :
+      'concatenation';
+    
     const logEntry = `Step ${i}: Added ${currentNode.id}${currentNodeOri} ` +
       `(${currentNodeSeq.length}bp original, ${mergeResult.newNodeContribution}bp contributed, ` +
-      `${mergeResult.method}${linkInfo.reversed ? ', used reverse link' : ''})`;
+      `${methodDesc})`;
     mergeLog.push(logEntry);
   }
   
@@ -550,13 +775,33 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
   console.log(`Final sequence length: ${currentSequence.length}bp`);
   console.log(`Segments processed: ${segments.length}`);
   console.log(`Path was ${pathReversed ? 'REVERSED' : 'UNCHANGED'} to match GFA links`);
+  console.log(`Topology: ${topology}`);
+  
+  // Enhanced link analysis
+  console.log(`\n=== BIDIRECTIONAL LINK ANALYSIS ===`);
+  const directLinks = linkResults.filter(r => r.method === 'direct').length;
+  const bidirectionalLinks = linkResults.filter(r => r.method === 'bidirectional').length;
+  const noLinks = linkResults.filter(r => !r.found).length;
+  
+  console.log(`Direct links found: ${directLinks}`);
+  console.log(`Bidirectional links used: ${bidirectionalLinks}`);
+  console.log(`No links (concatenated): ${noLinks}`);
   
   // Verify segment positions
   console.log(`\n=== POSITION VERIFICATION ===`);
   segments.forEach((seg, i) => {
     const segLength = seg.end - seg.start;
-    console.log(`Segment ${i + 1} (${seg.nodeId}${seg.orientation}): ${seg.start}-${seg.end} = ${segLength}bp contributed`);
+    console.log(`Segment ${i + 1} (${seg.nodeId}${seg.orientation}): ${seg.start}-${seg.end} = ${segLength}bp`);
   });
+  
+  // Validate no overlapping segments in final sequence
+  for (let i = 0; i < segments.length - 1; i++) {
+    const current = segments[i];
+    const next = segments[i + 1];
+    if (current.end > next.start) {
+      console.log(`⚠️ WARNING: Segment ${i + 1} overlaps with segment ${i + 2} in final sequence positions`);
+    }
+  }
   
   return {
     sequence: currentSequence,
@@ -564,7 +809,14 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
     mergeLog: mergeLog,
     totalLength: currentSequence.length,
     pathName: pathName,
-    pathReversed: pathReversed
+    pathReversed: pathReversed,
+    topology: topology,
+    linkAnalysis: {
+      direct: directLinks,
+      bidirectional: bidirectionalLinks,
+      concatenated: noLinks,
+      details: linkResults
+    }
   };
 }
 
@@ -572,7 +824,7 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
 
 // ENHANCED: Generate HTML report with color-coded sequence segments
 function generateSequenceReport(reconstructionResult) {
-  const { sequence, segments, mergeLog, totalLength, pathName } = reconstructionResult;
+  const { sequence, segments, mergeLog, totalLength, pathName, topology, linkAnalysis } = reconstructionResult;
   
   const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
   
@@ -591,12 +843,18 @@ function generateSequenceReport(reconstructionResult) {
         .stats { background: #f5f5f5; padding: 15px; margin: 15px 0; border-radius: 4px; }
         .merge-log { background: #e3f2fd; padding: 15px; margin: 15px 0; border-radius: 4px; }
         .perfect { border-left-color: #4caf50; }
+        .perfect_overlap { border-left-color: #4caf50; }
         .fuzzy { border-left-color: #ff9800; }
+        .fuzzy_overlap { border-left-color: #ff9800; }
         .gap { border-left-color: #f44336; }
+        .gap_insertion { border-left-color: #f44336; }
         .concat { border-left-color: #2196f3; }
+        .concatenation { border-left-color: #2196f3; }
+        .concatenation_fallback { border-left-color: #2196f3; }
         .first_node { border-left-color: #9c27b0; }
         .enhancement-note { background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #ffeaa7; }
         .position-check { background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #4caf50; }
+        .topology-info { background: #e1f5fe; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #0277bd; }
         
         /* Segment coloring for sequence visualization */
         .seg-0 { background-color: rgba(156, 39, 176, 0.3); } /* Purple */
@@ -651,9 +909,19 @@ function generateSequenceReport(reconstructionResult) {
             • Proper bidirectional link search (as per GFA specification)<br>
             • CIGAR transformation for reversed links (I↔D swap)<br>
             • Support for negative node IDs (separate from orientation)<br>
-            • Accurate overlap validation and merging<br>
+            • Intelligent path direction detection and hub topology handling<br>
             • <strong>NEW:</strong> Color-coded sequence visualization
         </div>
+        
+        ${topology ? `
+        <div class="topology-info">
+            <strong>🔄 Path Topology Analysis:</strong><br>
+            Detected topology: <strong>${topology}</strong><br>
+            ${topology === 'hub' ? '⚠️ Hub topology detected - this path includes a branching node' : ''}
+            ${topology === 'linear' ? '✓ Linear topology - optimal for sequence reconstruction' : ''}
+            ${topology === 'fallback' ? '⚠️ Complex topology - using fallback orientation detection' : ''}
+        </div>
+        ` : ''}
         
         <div class="stats">
             <strong>Reconstruction Statistics:</strong><br>
@@ -664,7 +932,10 @@ function generateSequenceReport(reconstructionResult) {
             Fuzzy Overlaps: ${segments.filter(s => s.method === 'fuzzy_overlap').length}<br>
             Gap Insertions: ${segments.filter(s => s.method === 'gap_insertion').length}<br>
             Concatenations: ${segments.filter(s => s.method === 'concatenation' || s.method === 'concatenation_fallback').length}<br>
-            Reverse Links Used: ${segments.filter(s => s.linkInfo && s.linkInfo.reversed).length}<br>
+            ${linkAnalysis ? `
+            Direct Links Used: ${linkAnalysis.direct}<br>
+            Bidirectional Links Used: ${linkAnalysis.bidirectional}<br>
+            ` : ''}
         </div>
         
         <div class="sequence-legend">
@@ -696,7 +967,7 @@ function generateSequenceReport(reconstructionResult) {
         ${segments.map((segment, index) => {
           const segmentLength = segment.end - segment.start;
           return `
-            <div class="segment ${segment.method || 'concat'}">
+            <div class="segment ${segment.method || 'concatenation'}">
                 <strong>Segment ${index + 1}: ${segment.nodeId}${segment.orientation}</strong>
                 <span class="legend-item seg-${index}" style="margin-left: 10px; font-size: 10px;">Color ${index + 1}</span><br>
                 Position: ${segment.start}-${segment.end} (${segmentLength} bp)<br>
@@ -705,10 +976,10 @@ function generateSequenceReport(reconstructionResult) {
                 ${segment.method ? `Merge Method: ${segment.method}<br>` : ''}
                 ${segment.overlapLength > 0 ? `Overlap Removed: ${segment.overlapLength} bp<br>` : ''}
                 ${segment.linkInfo && segment.linkInfo.found ? 
-                  `Link: ${segment.linkInfo.reversed ? 'reversed' : 'direct'} (${segment.linkInfo.overlap})<br>` : 
+                  `Link: ${segment.linkInfo.reversed ? 'bidirectional' : 'direct'} (${segment.linkInfo.overlap})<br>` : 
                   'Link: concatenation (no overlap found)<br>'}
                 ${segment.linkInfo && segment.linkInfo.reversed ? 
-                  `<em>Note: Used reverse link with transformed CIGAR</em><br>` : ''}
+                  `<em>Note: Used bidirectional link with transformed CIGAR</em><br>` : ''}
                 ${segment.linkInfo && segment.linkInfo.originalLink ? 
                   `<em>Original link: ${segment.linkInfo.originalLink}</em><br>` : ''}
                 ${segment.similarity ? `Overlap Similarity: ${(segment.similarity * 100).toFixed(1)}%<br>` : ''}
@@ -728,7 +999,8 @@ function generateSequenceReport(reconstructionResult) {
         • <span style="color: #f44336;">Red segments</span>: Poor overlaps with gap insertions<br>
         • <span style="color: #2196f3;">Blue segments</span>: Simple concatenation (no overlap)<br>
         • <span style="background-color: rgba(255, 193, 7, 0.6); padding: 2px 4px;">Overlap regions</span> are highlighted with yellow borders<br>
-        • Each segment has a unique background color in the final sequence
+        • Each segment has a unique background color in the final sequence<br>
+        • "Bidirectional" links were found by searching reverse GFA links and transforming orientations
     </div>
 </body>
 </html>`;
@@ -736,7 +1008,7 @@ function generateSequenceReport(reconstructionResult) {
   return html;
 }
 
-// NEW: Generate color-coded sequence HTML with segment highlighting
+// NEW: Generate color-coded sequence HTML with segment highlighting and overlap detection
 function generateColorCodedSequence(sequence, segments) {
   if (!sequence || segments.length === 0) {
     return sequence || '';
@@ -748,7 +1020,7 @@ function generateColorCodedSequence(sequence, segments) {
   const positionMap = new Array(sequence.length).fill(-1);
   const overlapMap = new Array(sequence.length).fill(false);
   
-  // Map each position to its primary segment
+  // Map each position to its primary segment and detect overlaps
   segments.forEach((segment, segIndex) => {
     for (let pos = segment.start; pos < segment.end; pos++) {
       if (pos < sequence.length) {
@@ -808,14 +1080,14 @@ function generateColorCodedSequence(sequence, segments) {
 
 // ===== MAIN EXPORT FUNCTIONS =====
 
-// Main export function (unchanged interface)
+// Main export function with enhanced bidirectional support
 export function exportPathSequence(pathData, nodes, links) {
   if (!pathData || !pathData.sequence) {
     alert('No path selected for export');
     return;
   }
   
-  console.log('=== FIXED GFA SEQUENCE EXPORT ===');
+  console.log('=== ENHANCED GFA SEQUENCE EXPORT WITH BIDIRECTIONAL SUPPORT ===');
   
   // Parse path and get node objects
   const nodeIds = pathData.sequence.split(',').map(id => id.trim());
@@ -829,7 +1101,7 @@ export function exportPathSequence(pathData, nodes, links) {
   
   console.log(`Processing path: ${pathNodes.map(n => n.id).join(' → ')}`);
   
-  // Reconstruct sequence using fixed algorithm
+  // Reconstruct sequence using enhanced algorithm with bidirectional support
   const result = reconstructSequenceFromPath(pathNodes, links, pathData.name);
   
   // Generate enhanced HTML report
@@ -849,11 +1121,14 @@ export function exportPathSequence(pathData, nodes, links) {
   
   console.log('=== EXPORT COMPLETE ===');
   console.log(`Final sequence: ${result.totalLength.toLocaleString()}bp`);
+  console.log(`Topology: ${result.topology}`);
   console.log(`Perfect overlaps: ${result.segments.filter(s => s.method === 'perfect_overlap').length}`);
-  console.log(`Reversed links used: ${result.segments.filter(s => s.linkInfo && s.linkInfo.reversed).length}`);
+  if (result.linkAnalysis) {
+    console.log(`Direct links: ${result.linkAnalysis.direct}, Bidirectional links: ${result.linkAnalysis.bidirectional}`);
+  }
 }
 
-// Export helper functions for UI integration
+// Export helper functions for UI integration (unchanged)
 export function addExportButton() {
   const pathManagement = document.getElementById('pathManagement');
   if (!pathManagement || document.getElementById('exportPathSequence')) return;
