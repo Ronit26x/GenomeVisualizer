@@ -1,10 +1,10 @@
-// sequence-exporter.js - COMPLETE DIAGNOSTIC VERSION with Enhanced Overlap Detection
+// sequence-exporter.js - ENHANCED: Intelligent starting orientation based on GFA links
 
 /**
- * Complete diagnostic GFA sequence reconstruction with:
- * 1. Enhanced orientation testing
- * 2. Detailed debug logging  
- * 3. Diagnostic capabilities for all orientation combinations
+ * Enhanced GFA sequence reconstruction that:
+ * 1. Uses actual GFA link between first two nodes to determine starting orientations
+ * 2. Supports both direct and bidirectional link analysis
+ * 3. Provides comprehensive diagnostics for all orientation decisions
  */
 
 // ===== UTILITY FUNCTIONS =====
@@ -567,17 +567,16 @@ function mergeSequencesWithOverlap(currentSequence, newNodeSeq, overlapInfo, nod
   }
 }
 
-// ===== MAIN RECONSTRUCTION FUNCTION =====
+// ===== ENHANCED MAIN RECONSTRUCTION FUNCTION =====
 
 /**
- * ENHANCED: Reconstruct sequence with comprehensive diagnostics
+ * ENHANCED: Reconstruct sequence with intelligent starting orientation
  */
 function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed Path') {
-  console.log(`\n🧬 === ENHANCED DIAGNOSTIC SEQUENCE RECONSTRUCTION ===`);
+  console.log(`\n🧬 === ENHANCED SEQUENCE RECONSTRUCTION WITH INTELLIGENT STARTING ORIENTATION ===`);
   console.log(`🎯 Path: ${pathName}`);
   console.log(`📋 Node sequence: ${pathNodes.map(n => n.id).join(' → ')}`);
   console.log(`🔗 Total links available: ${links.length}`);
-  console.log(`⚙️ Preserving exact node order as saved`);
   
   if (pathNodes.length === 0) {
     return {
@@ -610,6 +609,44 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
     };
   }
   
+  // ===== NEW: INTELLIGENT STARTING ORIENTATION =====
+  console.log(`\n🚀 === DETERMINING INTELLIGENT STARTING ORIENTATIONS ===`);
+  console.log(`🔍 Analyzing link between first two nodes: ${pathNodes[0].id} → ${pathNodes[1].id}`);
+  
+  // Find the link between first two nodes to determine starting orientations
+  const firstLinkInfo = findLinkForPathStepWithDiagnostics(
+    pathNodes[0], 
+    pathNodes[1], 
+    links, 
+    '+', // placeholder - will be determined by link analysis
+    '+', // placeholder - will be determined by link analysis
+    0
+  );
+  
+  let firstNodeOrientation, secondNodeOrientation;
+  
+  if (firstLinkInfo.found) {
+    firstNodeOrientation = firstLinkInfo.nodeAOrientation;
+    secondNodeOrientation = firstLinkInfo.nodeBOrientation;
+    
+    console.log(`✅ INTELLIGENT START: Using orientations from GFA link analysis`);
+    console.log(`   First node ${pathNodes[0].id}: ${firstNodeOrientation} orientation`);
+    console.log(`   Second node ${pathNodes[1].id}: ${secondNodeOrientation} orientation`);
+    console.log(`   Link method: ${firstLinkInfo.method}`);
+    console.log(`   Link overlap: ${firstLinkInfo.overlap}`);
+    if (firstLinkInfo.similarity !== undefined) {
+      console.log(`   Link quality: ${(firstLinkInfo.similarity * 100).toFixed(1)}% similarity`);
+    }
+  } else {
+    // Fallback to positive orientation if no link found
+    firstNodeOrientation = '+';
+    secondNodeOrientation = '+';
+    
+    console.log(`⚠️ FALLBACK START: No link found between first two nodes`);
+    console.log(`   Using default positive orientations for both nodes`);
+  }
+  
+  // Initialize reconstruction with intelligent starting orientation
   let currentSequence = '';
   const segments = [];
   const mergeLog = [];
@@ -622,11 +659,12 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
     perfectOverlaps: 0,
     fuzzyOverlaps: 0,
     gapInsertions: 0,
-    concatenations: 0
+    concatenations: 0,
+    intelligentStart: firstLinkInfo.found
   };
   
-  // Start with first node in positive orientation
-  let currentNodeOrientation = '+';
+  // Start with first node in the determined orientation
+  let currentNodeOrientation = firstNodeOrientation;
   const firstNodeSeq = getNodeSequence(pathNodes[0], currentNodeOrientation);
   currentSequence = firstNodeSeq;
   
@@ -637,15 +675,17 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
     start: 0,
     end: firstNodeSeq.length,
     contributedLength: firstNodeSeq.length,
-    method: 'first_node',
-    linkInfo: null
+    method: 'intelligent_start',
+    linkInfo: firstLinkInfo.found ? firstLinkInfo : null
   });
   
-  mergeLog.push(`🟢 Started with ${pathNodes[0].id}${currentNodeOrientation}: ${firstNodeSeq.length}bp`);
+  const startMethod = firstLinkInfo.found ? 'intelligent' : 'fallback';
+  mergeLog.push(`🟢 Started with ${pathNodes[0].id}${currentNodeOrientation}: ${firstNodeSeq.length}bp (${startMethod})`);
   
   console.log(`\n📊 Starting reconstruction with ${pathNodes.length} nodes, expecting ${pathNodes.length - 1} steps...`);
+  console.log(`🎯 First node: ${pathNodes[0].id}${currentNodeOrientation} (${firstNodeSeq.length}bp)`);
   
-  // Process each subsequent node
+  // Process each subsequent node (starting from the second node)
   for (let i = 1; i < pathNodes.length; i++) {
     const prevNode = pathNodes[i - 1];
     const currentNode = pathNodes[i];
@@ -653,15 +693,29 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
     console.log(`\n\n🚀 === PROCESSING STEP ${i}/${pathNodes.length - 1}: ${prevNode.id} → ${currentNode.id} ===`);
     console.log(`📊 Progress: ${i}/${pathNodes.length - 1} steps (${((i / (pathNodes.length - 1)) * 100).toFixed(1)}%)`);
     
-    // Find the best link for this step with comprehensive diagnostics
-    const linkInfo = findLinkForPathStepWithDiagnostics(
-      prevNode, 
-      currentNode, 
-      links, 
-      currentNodeOrientation, 
-      '+', 
-      i
-    );
+    let linkInfo;
+    let nextNodeOrientation;
+    
+    if (i === 1 && firstLinkInfo.found) {
+      // For the first step, we already have the link info and orientations
+      linkInfo = firstLinkInfo;
+      nextNodeOrientation = secondNodeOrientation;
+      
+      console.log(`🔄 REUSING FIRST LINK: Already analyzed ${prevNode.id}${currentNodeOrientation} → ${currentNode.id}${nextNodeOrientation}`);
+      console.log(`   Link method: ${linkInfo.method}`);
+      console.log(`   Link overlap: ${linkInfo.overlap}`);
+    } else {
+      // For subsequent steps, find the link as normal
+      linkInfo = findLinkForPathStepWithDiagnostics(
+        prevNode, 
+        currentNode, 
+        links, 
+        currentNodeOrientation, 
+        '+', 
+        i
+      );
+      nextNodeOrientation = linkInfo.nodeBOrientation || '+';
+    }
     
     // Update diagnostics
     if (linkInfo.found) {
@@ -681,17 +735,17 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
       found: linkInfo.found,
       method: linkInfo.method || 'no_link',
       previousOrientation: currentNodeOrientation,
-      nextOrientation: linkInfo.nodeBOrientation,
+      nextOrientation: nextNodeOrientation,
       overlap: linkInfo.overlap,
       similarity: linkInfo.similarity,
       originalLink: linkInfo.originalLink,
       transformedLink: linkInfo.transformedLink,
-      diagnostics: linkInfo.orientationDiagnostics || null
+      diagnostics: linkInfo.orientationDiagnostics || null,
+      reusedFirstLink: i === 1 && firstLinkInfo.found
     });
     
-    // Update current node orientation based on link result
-    const nextNodeOrientation = linkInfo.nodeBOrientation || '+';
-    currentNodeOrientation = nextNodeOrientation; // This will be used for the next step
+    // Update current node orientation for the next step
+    currentNodeOrientation = nextNodeOrientation;
     
     // Get the sequence for current node in determined orientation
     const currentNodeSeq = getNodeSequence(currentNode, nextNodeOrientation);
@@ -763,16 +817,19 @@ function reconstructSequenceFromPath(pathNodes, links, pathName = 'Reconstructed
     const similarityDesc = mergeResult.similarity !== undefined ? 
       ` [${(mergeResult.similarity * 100).toFixed(1)}%]` : '';
     
+    const reuseNote = (i === 1 && firstLinkInfo.found) ? ' [reused first link]' : '';
+    
     mergeLog.push(`${methodIcon} Step ${i}: Added ${currentNode.id}${nextNodeOrientation} ` +
-      `(${currentNodeSeq.length}bp → ${mergeResult.newNodeContribution}bp, ${methodDesc}${similarityDesc})`);
+      `(${currentNodeSeq.length}bp → ${mergeResult.newNodeContribution}bp, ${methodDesc}${similarityDesc}${reuseNote})`);
   }
   
   console.log(`\n🎉 === RECONSTRUCTION COMPLETE ===`);
   console.log(`📏 Final sequence: ${currentSequence.length}bp`);
-  console.log(`🔗 Path: ${segments.map(s => `${s.nodeId}${s.orientation}`).join(' → ')}`);
+  console.log(`🔗 Final path: ${segments.map(s => `${s.nodeId}${s.orientation}`).join(' → ')}`);
   
   // Enhanced diagnostics summary
   console.log(`\n📊 === COMPREHENSIVE DIAGNOSTICS ===`);
+  console.log(`Intelligent start: ${diagnostics.intelligentStart ? 'YES' : 'NO (fallback used)'}`);
   console.log(`Steps processed: ${diagnostics.totalSteps}`);
   console.log(`Links found: ${diagnostics.linksFound}/${diagnostics.totalSteps}`);
   console.log(`  - Direct links: ${diagnostics.directLinks}`);
@@ -818,7 +875,7 @@ function generateSequenceReport(reconstructionResult) {
   let html = `<!DOCTYPE html>
 <html>
 <head>
-    <title>🔬 Diagnostic Sequence Reconstruction: ${pathName}</title>
+    <title>🔬 Enhanced Diagnostic Sequence Reconstruction: ${pathName}</title>
     <style>
         body { font-family: 'Courier New', monospace; margin: 20px; line-height: 1.6; }
         .header { font-family: Arial, sans-serif; margin-bottom: 20px; }
@@ -828,6 +885,7 @@ function generateSequenceReport(reconstructionResult) {
         .merge-log { background: #e3f2fd; padding: 15px; margin: 15px 0; border-radius: 4px; }
         .enhancement-note { background: #d4edda; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #c3e6cb; }
         .diagnostic-panel { background: #fff3cd; padding: 15px; margin: 15px 0; border-radius: 4px; border: 1px solid #ffeaa7; }
+        .intelligent-start { background: #e1f5fe; padding: 15px; margin: 15px 0; border-radius: 4px; border: 1px solid #0277bd; }
         
         /* Method-based coloring */
         .perfect_overlap { border-left-color: #4caf50; }
@@ -835,7 +893,7 @@ function generateSequenceReport(reconstructionResult) {
         .gap_insertion { border-left-color: #f44336; }
         .concatenation { border-left-color: #2196f3; }
         .concatenation_fallback { border-left-color: #2196f3; }
-        .first_node { border-left-color: #9c27b0; }
+        .intelligent_start { border-left-color: #9c27b0; }
         
         /* Segment coloring for visualization */
         .seg-0 { background-color: rgba(156, 39, 176, 0.3); }
@@ -931,27 +989,44 @@ function generateSequenceReport(reconstructionResult) {
 </head>
 <body>
     <div class="header">
-        <h1>🔬 Diagnostic GFA Sequence Reconstruction</h1>
+        <h1>🔬 Enhanced Diagnostic GFA Sequence Reconstruction</h1>
         <h2>Path: ${pathName}</h2>
         <p><strong>Generated:</strong> ${timestamp}</p>
         
         <div class="enhancement-note">
-            <strong>🚀 DIAGNOSTIC FEATURES:</strong><br>
-            • Comprehensive orientation testing for all node pairs<br>
-            • Detailed sequence similarity analysis for each overlap<br>
-            • Complete link search diagnostics with bidirectional transformation<br>
-            • Enhanced gap insertion with diagnostic information<br>
-            • Full debugging output preserved in browser console<br>
-            • Success rate analysis and quality metrics
+            <strong>🚀 NEW INTELLIGENT STARTING ORIENTATION:</strong><br>
+            • First two nodes analyzed to determine optimal starting orientations<br>
+            • GFA link between first two nodes used for orientation decisions<br>
+            • Direct and bidirectional links properly handled from the start<br>
+            • Eliminates arbitrary positive orientation assumption<br>
+            • Improves overall reconstruction accuracy and consistency
         </div>
+        
+        ${diagnostics.intelligentStart ? `
+        <div class="intelligent-start">
+            <strong>✅ INTELLIGENT START SUCCESSFUL:</strong><br>
+            Found GFA link between first two nodes (${segments[0]?.nodeId} → ${segments[1]?.nodeId})<br>
+            Starting orientations determined from actual GFA data<br>
+            First node: ${segments[0]?.nodeId}${segments[0]?.orientation}<br>
+            Second node: ${segments[1]?.nodeId}${segments[1]?.orientation}
+        </div>
+        ` : `
+        <div class="intelligent-start" style="background: #fff3cd; border-color: #ffc107;">
+            <strong>⚠️ FALLBACK START USED:</strong><br>
+            No GFA link found between first two nodes (${segments[0]?.nodeId} → ${segments[1]?.nodeId})<br>
+            Using default positive orientations for starting nodes<br>
+            Consider checking if these nodes should be connected in your GFA file
+        </div>
+        `}
         
         ${diagnosticSummary}
         
         <div class="stats">
-            <strong>Reconstruction Statistics:</strong><br>
+            <strong>Enhanced Reconstruction Statistics:</strong><br>
             Total Sequence Length: ${totalLength.toLocaleString()} bp<br>
             Path Segments: ${segments.length}<br>
             Final Path: ${segments.map(s => `${s.nodeId}${s.orientation}`).join(' → ')}<br>
+            Intelligent Start: ${diagnostics.intelligentStart ? 'YES' : 'NO (fallback)'}<br>
             ${linkAnalysis ? `
             Direct Links Found: ${linkAnalysis.direct}<br>
             Bidirectional Links Used: ${linkAnalysis.bidirectional}<br>
@@ -984,6 +1059,11 @@ function generateSequenceReport(reconstructionResult) {
             diagnosticInfo = `<br><em>Diagnostics: ${segment.diagnostics.reason || 'N/A'}</em>`;
           }
           
+          let methodDescription = '';
+          if (segment.method === 'intelligent_start') {
+            methodDescription = `<br><strong>🧠 Intelligent Start:</strong> Orientation determined from GFA link analysis`;
+          }
+          
           return `
             <div class="segment ${segment.method || 'concatenation'}">
                 <strong>Segment ${index + 1}: ${segment.nodeId}${segment.orientation}</strong>
@@ -998,8 +1078,9 @@ function generateSequenceReport(reconstructionResult) {
                 ${segment.linkInfo.originalLink ? `Original Link: ${segment.linkInfo.originalLink}<br>` : ''}
                 ${segment.linkInfo.transformedLink && segment.linkInfo.method === 'bidirectional' ? 
                   `Transformed Link: ${segment.linkInfo.transformedLink}<br>` : ''}
-                ` : 'Link: No GFA link found - concatenated<br>'}
+                ` : segment.method !== 'intelligent_start' ? 'Link: No GFA link found - concatenated<br>' : ''}
                 ${segment.similarity !== undefined ? `Overlap Similarity: ${(segment.similarity * 100).toFixed(1)}%<br>` : ''}
+                ${methodDescription}
                 ${diagnosticInfo}
             </div>
           `;
@@ -1010,13 +1091,13 @@ function generateSequenceReport(reconstructionResult) {
     <div class="sequence">${coloredSequenceHtml}</div>
     
     <div class="enhancement-note" style="margin-top: 20px;">
-        <strong>🔍 How to interpret this diagnostic reconstruction:</strong><br>
-        • <strong>Orientation Testing:</strong> All possible +/- combinations tested for each node pair<br>
-        • <strong>Similarity Analysis:</strong> Actual sequence overlap quality measured and reported<br>
-        • <strong>Link Diagnostics:</strong> Both direct and bidirectional GFA links searched and tested<br>
-        • <strong>Gap Insertions:</strong> When overlaps fail, detailed diagnostic info is preserved<br>
-        • <strong>Console Output:</strong> Check browser console for complete diagnostic logs<br>
-        • <strong>Success Metrics:</strong> Overall reconstruction quality assessed and reported
+        <strong>🔍 How to interpret this enhanced diagnostic reconstruction:</strong><br>
+        • <strong>Intelligent Start:</strong> First two nodes analyzed to determine optimal starting orientations<br>
+        • <strong>GFA Link Analysis:</strong> Actual GFA L lines searched and used for orientation decisions<br>
+        • <strong>Direct/Bidirectional Detection:</strong> Link direction properly determined and applied<br>
+        • <strong>Comprehensive Testing:</strong> All orientation combinations tested for overlap quality<br>
+        • <strong>Gap Diagnostics:</strong> Poor overlaps preserved with detailed diagnostic information<br>
+        • <strong>Console Logging:</strong> Complete step-by-step analysis available in browser console
     </div>
 </body>
 </html>`;
@@ -1031,11 +1112,18 @@ function generateDiagnosticSummary(diagnostics, linkAnalysis) {
   const linkSuccessRate = (diagnostics.linksFound / diagnostics.totalSteps * 100) || 0;
   
   const successClass = successRate >= 80 ? 'success-rate' : successRate >= 50 ? 'warning-rate' : 'error-rate';
+  const intelligentStartClass = diagnostics.intelligentStart ? 'success-rate' : 'warning-rate';
   
   return `
     <div class="diagnostic-panel">
-        <h3>🔬 Diagnostic Analysis</h3>
+        <h3>🔬 Enhanced Diagnostic Analysis</h3>
         <div class="diagnostic-grid">
+            <div class="diagnostic-card">
+                <div class="diagnostic-title">Intelligent Start</div>
+                <div class="diagnostic-value ${intelligentStartClass}">${diagnostics.intelligentStart ? 'YES' : 'NO'}</div>
+                <div class="diagnostic-description">${diagnostics.intelligentStart ? 'Used GFA link for starting orientations' : 'Fallback to default orientations'}</div>
+            </div>
+            
             <div class="diagnostic-card">
                 <div class="diagnostic-title">Overall Success Rate</div>
                 <div class="diagnostic-value ${successClass}">${successRate.toFixed(1)}%</div>
@@ -1070,6 +1158,12 @@ function generateDiagnosticSummary(diagnostics, linkAnalysis) {
                 <div class="diagnostic-title">Bidirectional Links</div>
                 <div class="diagnostic-value">${diagnostics.bidirectionalLinks}</div>
                 <div class="diagnostic-description">Reverse links found and transformed</div>
+            </div>
+            
+            <div class="diagnostic-card">
+                <div class="diagnostic-title">Direct Links</div>
+                <div class="diagnostic-value">${diagnostics.directLinks}</div>
+                <div class="diagnostic-description">Forward links used as-is</div>
             </div>
         </div>
     </div>
@@ -1146,7 +1240,7 @@ function generateColorCodedSequence(sequence, segments) {
 // ===== EXPORT FUNCTIONS =====
 
 /**
- * Main export function with comprehensive diagnostics
+ * Main export function with enhanced intelligent starting orientation
  */
 export function exportPathSequence(pathData, nodes, links) {
   if (!pathData || !pathData.sequence) {
@@ -1154,7 +1248,7 @@ export function exportPathSequence(pathData, nodes, links) {
     return;
   }
   
-  console.log('\n🚀 === DIAGNOSTIC GFA SEQUENCE EXPORT ===');
+  console.log('\n🚀 === ENHANCED DIAGNOSTIC GFA SEQUENCE EXPORT WITH INTELLIGENT START ===');
   console.log(`📋 Exporting path: ${pathData.name}`);
   console.log(`🔗 Path sequence: ${pathData.sequence}`);
   console.log(`📊 Available nodes: ${nodes.length}`);
@@ -1172,6 +1266,10 @@ export function exportPathSequence(pathData, nodes, links) {
   
   console.log(`✅ Processing ${pathNodes.length} nodes in exact order: ${pathNodes.map(n => n.id).join(' → ')}`);
   
+  if (pathNodes.length >= 2) {
+    console.log(`🎯 Will analyze first link: ${pathNodes[0].id} → ${pathNodes[1].id} for intelligent starting orientations`);
+  }
+  
   // Show a quick preview of available links
   console.log(`\n📋 Quick link preview (first 10):`);
   links.slice(0, 10).forEach((link, i) => {
@@ -1183,14 +1281,14 @@ export function exportPathSequence(pathData, nodes, links) {
     console.log(`  ... and ${links.length - 10} more links`);
   }
   
-  // Reconstruct sequence with comprehensive diagnostics
+  // Reconstruct sequence with enhanced intelligent starting orientation
   const result = reconstructSequenceFromPath(pathNodes, links, pathData.name);
   
   // Generate enhanced HTML report
   const htmlContent = generateSequenceReport(result);
   
-  // Download file with diagnostic suffix
-  const filename = `${pathData.name.replace(/[^a-zA-Z0-9]/g, '_')}_DIAGNOSTIC_sequence.html`;
+  // Download file with enhanced diagnostic suffix
+  const filename = `${pathData.name.replace(/[^a-zA-Z0-9]/g, '_')}_ENHANCED_DIAGNOSTIC_sequence.html`;
   const blob = new Blob([htmlContent], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
   
@@ -1202,10 +1300,11 @@ export function exportPathSequence(pathData, nodes, links) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   
-  console.log('\n🎉 === DIAGNOSTIC EXPORT COMPLETE ===');
+  console.log('\n🎉 === ENHANCED DIAGNOSTIC EXPORT COMPLETE ===');
   console.log(`📄 File: ${filename}`);
   console.log(`📏 Final sequence: ${result.totalLength.toLocaleString()}bp`);
   console.log(`🎯 Final path: ${result.segments.map(s => `${s.nodeId}${s.orientation}`).join(' → ')}`);
+  console.log(`🧠 Intelligent start: ${result.diagnostics.intelligentStart ? 'SUCCESS' : 'FALLBACK USED'}`);
   
   if (result.diagnostics) {
     const successRate = ((result.diagnostics.perfectOverlaps + result.diagnostics.fuzzyOverlaps) / result.diagnostics.totalSteps * 100) || 0;
@@ -1226,8 +1325,8 @@ export function addExportButton() {
     const exportBtn = document.createElement('button');
     exportBtn.id = 'exportPathSequence';
     exportBtn.className = 'export-btn';
-    exportBtn.textContent = 'Export Diagnostic';
-    exportBtn.title = 'Download comprehensive diagnostic sequence file';
+    exportBtn.textContent = 'Export Enhanced';
+    exportBtn.title = 'Download enhanced diagnostic sequence file with intelligent starting orientation';
     exportBtn.disabled = true;
     
     navSection.appendChild(exportBtn);
