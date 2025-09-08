@@ -13,8 +13,7 @@ export function mergeNodesFromPath(pathNodes, nodes, links, pathName = 'Merged P
     throw new Error('At least 2 nodes are required for merging');
   }
 
-  console.log(`\n🔗 === NODE MERGING: ${pathName} ===`);
-  console.log(`📋 Merging ${pathNodes.length} nodes: ${pathNodes.map(n => n.id).join(' → ')}`);
+  console.log(`Merging ${pathNodes.length} nodes: ${pathNodes.map(n => n.id).join(' → ')}`);
   
   // Create the merged node ID
   const mergedNodeId = generateMergedNodeId(pathNodes);
@@ -22,10 +21,10 @@ export function mergeNodesFromPath(pathNodes, nodes, links, pathName = 'Merged P
   // Collect all external connections (edges that connect to nodes outside the path)
   const externalConnections = collectExternalConnections(pathNodes, links);
   
-  console.log(`🔗 Found ${externalConnections.length} external connections to preserve`);
+  console.log(`Found ${externalConnections.length} external connections to preserve`);
   
-  // Create the new merged node
-  const mergedNode = createMergedNode(pathNodes, mergedNodeId, pathName);
+  // Create the new merged node with original data stored
+  const mergedNode = createMergedNode(pathNodes, mergedNodeId, pathName, links);
   
   // Remove original nodes and their internal links
   const updatedNodes = removeOriginalNodes(nodes, pathNodes);
@@ -38,7 +37,7 @@ export function mergeNodesFromPath(pathNodes, nodes, links, pathName = 'Merged P
   const newLinks = createMergedNodeLinks(externalConnections, mergedNodeId);
   updatedLinks.push(...newLinks);
   
-  console.log(`✅ Merge complete: Created node ${mergedNodeId} with ${newLinks.length} connections`);
+  console.log(`Merge complete: Created node ${mergedNodeId} with ${newLinks.length} connections`);
   
   return {
     success: true,
@@ -114,46 +113,42 @@ function collectExternalConnections(pathNodes, links) {
 /**
  * Create the merged node with combined properties
  */
-function createMergedNode(pathNodes, mergedNodeId, pathName) {
+function createMergedNode(pathNodes, mergedNodeId, pathName, originalLinks = []) {
   // Calculate combined properties
   const totalLength = pathNodes.reduce((sum, node) => sum + (node.length || 1000), 0);
   const avgDepth = pathNodes.reduce((sum, node) => sum + (node.depth || 1.0), 0) / pathNodes.length;
   
-  // Create merged sequence reference (without storing the actual sequence)
-  const mergedSequenceInfo = {
-    nodeIds: pathNodes.map(n => n.id),
-    pathName: pathName,
-    nodeCount: pathNodes.length,
-    totalLength: totalLength
-  };
+  // Get the path node IDs for filtering links
+  const pathNodeIds = new Set(pathNodes.map(n => String(n.id)));
+  
+  // Store ALL original links between these nodes for sequence reconstruction
+  const storedLinks = (originalLinks || []).filter(link => {
+    const sourceId = String(link.source.id || link.source);
+    const targetId = String(link.target.id || link.target);
+    return pathNodeIds.has(sourceId) && pathNodeIds.has(targetId);
+  });
   
   const mergedNode = {
     id: mergedNodeId,
     length: totalLength,
     depth: avgDepth,
-    seq: '*', // Placeholder - actual sequence generated on export
+    seq: '*',
     gfaType: 'merged_segment',
     mergedFrom: pathNodes.map(n => n.id),
-    mergedSequenceInfo: mergedSequenceInfo,
     pathName: pathName,
-    originalNodes: pathNodes.map(node => ({
-      id: node.id,
-      length: node.length || 1000,
-      seq: node.seq || '*',
-      depth: node.depth || 1.0
-    })),
-    // Positioning - start at center of original nodes
+    
+    // Store complete original data for sequence reconstruction
+    originalNodes: pathNodes,  // Store the actual node objects
+    originalLinks: storedLinks, // Store the actual link objects
+    
+    // Positioning
     x: pathNodes.reduce((sum, n) => sum + (n.x || 0), 0) / pathNodes.length,
     y: pathNodes.reduce((sum, n) => sum + (n.y || 0), 0) / pathNodes.length,
     vx: 0,
     vy: 0
   };
   
-  console.log(`🆕 Created merged node: ${mergedNodeId}`);
-  console.log(`   - Total length: ${totalLength}bp`);
-  console.log(`   - Average depth: ${avgDepth.toFixed(2)}`);
-  console.log(`   - From ${pathNodes.length} original nodes`);
-  
+  console.log(`Created merged node with ${pathNodes.length} original nodes and ${storedLinks.length} original links stored`);
   return mergedNode;
 }
 

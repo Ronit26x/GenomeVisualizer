@@ -251,7 +251,6 @@ function mergeSelectedNodes() {
   }
 }
 
-// NEW: Export sequence for merged node
 function exportMergedSequence() {
   if (selected.nodes.size !== 1) {
     alert('Please select exactly one merged node to export its sequence');
@@ -269,20 +268,23 @@ function exportMergedSequence() {
   try {
     logEvent(`Exporting sequence for merged node: ${selectedNode.id}`);
     
-    // Create original nodes array from stored node data
+    // Use the data stored directly in the merged node
     const originalNodes = selectedNode.originalNodes || [];
+    const originalLinks = selectedNode.originalLinks || [];
     
-    // For merged nodes, we need to reconstruct the original links
-    // This is a simplified approach - in practice you might want to store more link info
-    const originalLinks = links;
+    console.log(`Using stored data: ${originalNodes.length} nodes, ${originalLinks.length} links`);
+    
+    if (originalNodes.length === 0) {
+      throw new Error('No original nodes stored in merged node');
+    }
     
     exportMergedNodeSequence(selectedNode, originalNodes, originalLinks);
-    logEvent(`✅ Exported sequence for merged node "${selectedNode.pathName}"`);
+    logEvent(`Exported sequence for merged node "${selectedNode.pathName || selectedNode.id}"`);
     
   } catch (error) {
     console.error('Error exporting merged sequence:', error);
     alert(`Error exporting sequence: ${error.message}`);
-    logEvent(`❌ Export failed: ${error.message}`);
+    logEvent(`Export failed: ${error.message}`);
   }
 }
 
