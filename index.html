@@ -27,6 +27,13 @@
         <button id="resolvePhysical" disabled>Resolve Physical</button>
       </div>
       
+      <!-- NEW: NODE MERGING SECTION -->
+      <div class="merge-section">
+        <h4>Node Merging</h4>
+        <button id="mergeNodes" disabled>Merge Selected Nodes</button>
+        <button id="exportMergedSequence" disabled>Export Merged Sequence</button>
+      </div>
+      
       <button id="redraw">Redraw Layout</button>
       
       <!-- ENHANCED PATH MANAGEMENT SECTION -->
@@ -115,6 +122,16 @@
         • Choose which paths to keep<br>
         • Creates new vertices for each path
       </div>
+      
+      <!-- NEW: Merge Instructions -->
+      <div id="mergeInstructions" style="display: block; margin-top: 15px; padding: 10px; background: #e8f5e8; border: 1px solid #4caf50; border-radius: 4px; font-size: 12px;">
+        <strong>Node Merging:</strong><br>
+        • <strong>Select a path</strong> with 2+ nodes<br>
+        • Use <strong>Merge Selected Nodes</strong> to combine them<br>
+        • <strong>Export Merged Sequence</strong> to view combined sequence<br>
+        • Merged nodes preserve external connections<br>
+        • Click merged node to see merge details
+      </div>
     </div>
     <div id="viz">
       <canvas id="canvas"></canvas>
@@ -148,15 +165,18 @@
       const flipButton = document.getElementById('flipNode');
       const flipInstructions = document.getElementById('flipInstructions');
       const resolveInstructions = document.getElementById('resolveInstructions');
+      const mergeInstructions = document.getElementById('mergeInstructions');
       
       if (format === 'gfa') {
         flipButton.style.display = 'block';
         flipInstructions.style.display = 'block';
         resolveInstructions.style.display = 'block';
+        mergeInstructions.style.display = 'block';
       } else {
         flipButton.style.display = 'none';
         flipInstructions.style.display = 'none';
         resolveInstructions.style.display = 'block'; // Resolution works for both formats
+        mergeInstructions.style.display = 'block'; // Merging works for both formats
       }
     }
     

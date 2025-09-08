@@ -1,4 +1,4 @@
-// main.js - COMPLETE: Enhanced with multi-path highlighting system and path updates
+// main.js - COMPLETE: Enhanced with node merging functionality
 
 import { exportAllPathsToFile, showExportPreviewDialog, addExportStyles } from './path-exporter.js';
 import { importPathsFromText, showImportResultsDialog, addImportStyles } from './path-importer.js';
@@ -10,6 +10,7 @@ import { updatePathsAfterResolution, showPathUpdateSummary } from './path-update
 import { showPathUpdateDialog, markUpdatedPathsInUI, addPathUpdateStyles } from './path-update-ui.js';
 import { setupUI }                  from './ui.js';
 import { exportPathSequence, addExportButton } from './sequence-exporter.js';
+import { mergeNodesFromPath, exportMergedNodeSequence, isMergedNode, getMergedNodeInfo, updatePathsAfterMerge } from './node-merger.js';
 
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
@@ -167,6 +168,151 @@ function flipSelected() {
     // Restart simulation with low alpha to settle the layout
     simulation.alpha(0.1).restart();
     drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
+  }
+}
+
+// NEW: Merge selected nodes from current path
+function mergeSelectedNodes() {
+  if (currentPathIndex < 0 || currentPathIndex >= savedPaths.length) {
+    alert('Please select a path first before merging nodes');
+    logEvent('No path selected for node merging');
+    return;
+  }
+  
+  const currentPath = savedPaths[currentPathIndex];
+  const pathNodeIds = currentPath.sequence.split(',').map(id => id.trim());
+  
+  if (pathNodeIds.length < 2) {
+    alert('Path must contain at least 2 nodes to merge');
+    logEvent('Path too short for merging');
+    return;
+  }
+  
+  try {
+    logEvent(`Starting merge of ${pathNodeIds.length} nodes from path "${currentPath.name}"`);
+    
+    // Get node objects for the path
+    const nodeMap = new Map(nodes.map(n => [String(n.id), n]));
+    const pathNodes = pathNodeIds.map(id => nodeMap.get(String(id))).filter(Boolean);
+    
+    if (pathNodes.length !== pathNodeIds.length) {
+      throw new Error('Some nodes in the path were not found in the graph');
+    }
+    
+    // Store original state for undo
+    history.push({
+      nodes: JSON.parse(JSON.stringify(nodes)),
+      links: JSON.parse(JSON.stringify(links))
+    });
+    if (history.length > 20) history.shift();
+    
+    // Perform the merge
+    const mergeResult = mergeNodesFromPath(pathNodes, nodes, links, currentPath.name);
+    
+    if (mergeResult.success) {
+      // Update the graph
+      nodes = mergeResult.newNodes;
+      links = mergeResult.newLinks;
+      
+      // Update global references
+      window.nodes = nodes;
+      window.links = links;
+      
+      // Update saved paths to reflect the merge
+      savedPaths = updatePathsAfterMerge(savedPaths, mergeResult);
+      
+      // Clear current path selection since it's been merged
+      currentPathIndex = -1;
+      highlightedPath.nodes.clear();
+      highlightedPath.edges.clear();
+      
+      // Clear node selection
+      selected.nodes.clear();
+      selected.edges.clear();
+      
+      // Update UI
+      updatePathUI();
+      updateMergeButtons();
+      
+      // Restart simulation
+      startSimulation();
+      
+      logEvent(`✅ Successfully merged ${mergeResult.removedNodes} nodes into ${mergeResult.mergedNodeId}`);
+      logEvent(`   Preserved ${mergeResult.externalConnections} external connections`);
+      
+    } else {
+      throw new Error('Merge operation failed');
+    }
+    
+  } catch (error) {
+    console.error('Error during node merge:', error);
+    alert(`Error merging nodes: ${error.message}`);
+    logEvent(`❌ Merge failed: ${error.message}`);
+  }
+}
+
+// NEW: Export sequence for merged node
+function exportMergedSequence() {
+  if (selected.nodes.size !== 1) {
+    alert('Please select exactly one merged node to export its sequence');
+    return;
+  }
+  
+  const selectedNodeId = Array.from(selected.nodes)[0];
+  const selectedNode = nodes.find(n => n.id === selectedNodeId);
+  
+  if (!selectedNode || !isMergedNode(selectedNode)) {
+    alert('Selected node is not a merged node');
+    return;
+  }
+  
+  try {
+    logEvent(`Exporting sequence for merged node: ${selectedNode.id}`);
+    
+    // Create original nodes array from stored node data
+    const originalNodes = selectedNode.originalNodes || [];
+    
+    // For merged nodes, we need to reconstruct the original links
+    // This is a simplified approach - in practice you might want to store more link info
+    const originalLinks = links;
+    
+    exportMergedNodeSequence(selectedNode, originalNodes, originalLinks);
+    logEvent(`✅ Exported sequence for merged node "${selectedNode.pathName}"`);
+    
+  } catch (error) {
+    console.error('Error exporting merged sequence:', error);
+    alert(`Error exporting sequence: ${error.message}`);
+    logEvent(`❌ Export failed: ${error.message}`);
+  }
+}
+
+// NEW: Update merge button states
+function updateMergeButtons() {
+  const mergeBtn = document.getElementById('mergeNodes');
+  const exportMergedBtn = document.getElementById('exportMergedSequence');
+  
+  // Merge button: enabled when a path with 2+ nodes is selected
+  if (mergeBtn) {
+    const hasValidPath = currentPathIndex >= 0 && 
+                        currentPathIndex < savedPaths.length &&
+                        savedPaths[currentPathIndex].sequence.split(',').length >= 2;
+    
+    mergeBtn.disabled = !hasValidPath;
+    
+    if (hasValidPath) {
+      const nodeCount = savedPaths[currentPathIndex].sequence.split(',').length;
+      mergeBtn.textContent = `Merge Selected Nodes (${nodeCount})`;
+    } else {
+      mergeBtn.textContent = 'Merge Selected Nodes';
+    }
+  }
+  
+  // Export merged sequence button: enabled when exactly one merged node is selected
+  if (exportMergedBtn) {
+    const hasSelectedMergedNode = selected.nodes.size === 1 && 
+                                 nodes.find(n => n.id === Array.from(selected.nodes)[0] && isMergedNode(n));
+    
+    exportMergedBtn.disabled = !hasSelectedMergedNode;
   }
 }
 
@@ -697,6 +843,7 @@ function performVertexResolution() {
   pinnedNodes.delete(vertex.id);
   updateResolveButton();
   updatePhysicalResolveButton();
+  updateMergeButtons();
   updatePathUI();
   hideResolveDialog();
 
@@ -872,6 +1019,7 @@ function performPhysicalResolution() {
   pinnedNodes.delete(vertex.id);
   updateResolveButton();
   updatePhysicalResolveButton();
+  updateMergeButtons();
   updatePathUI();
   hideResolveDialog();
 
@@ -986,6 +1134,7 @@ function highlightPaths(sequence, pathName = null) {
   highlightedPath.currentColor = newPath.color;
   
   updatePathUI();
+  updateMergeButtons(); // Update merge buttons when path changes
   logEvent(`Saved path "${newPath.name}": ${validNodes.join(' → ')}`);
   drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
@@ -1009,6 +1158,7 @@ function showPath(index) {
   }
   
   updatePathUI(); // This will now handle export button state
+  updateMergeButtons(); // Update merge buttons when path selection changes
   drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
 
@@ -1028,6 +1178,7 @@ function deletePath(index) {
   }
   
   updatePathUI();
+  updateMergeButtons(); // Update merge buttons when path is deleted
   logEvent(`Deleted path "${deletedPath.name}"`);
   drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
@@ -1041,6 +1192,7 @@ function clearAllPaths() {
   nextPathId = 1;
   
   updatePathUI();
+  updateMergeButtons(); // Update merge buttons when all paths cleared
   logEvent('Cleared all saved paths');
   drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
 }
@@ -1152,35 +1304,6 @@ function updatePathUI() {
   markUpdatedPathsInUI(savedPaths);
 }
 
-// Simplified createExportButton function
-// function createExportButton() {
-//   console.log('Creating export button...');
-  
-//   let existingButton = document.getElementById('exportPathSequence');
-//   if (existingButton) {
-//     console.log('Export button already exists');
-//     return existingButton;
-//   }
-  
-//   const navActions = document.querySelector('.nav-header-actions');
-//   if (navActions) {
-//     const exportBtn = document.createElement('button');
-//     exportBtn.id = 'exportPathSequence';
-//     exportBtn.className = 'export-btn';
-//     exportBtn.textContent = 'Export Sequence';
-//     exportBtn.title = 'Download sequence file for selected path';
-//     exportBtn.disabled = true;
-    
-//     navActions.appendChild(exportBtn);
-//     console.log('Export button created and added to nav-header-actions');
-    
-//     return exportBtn;
-//   } else {
-//     console.error('Could not find nav-header-actions container');
-//     return null;
-//   }
-// }
-
 function navigatePath(direction) {
   if (savedPaths.length === 0) return;
   
@@ -1239,31 +1362,46 @@ function selectNode(evt) {
     selected.nodes.clear();
     selected.nodes.add(found.id);
     
-    // Show node information with flip status for GFA nodes
+    // Show node information with enhanced info for merged nodes
     let infoHTML = `<strong>Node ${found.id}</strong>`;
-    if (currentFormat === 'gfa' && nodes._gfaNodes) {
-      const gfaNode = nodes._gfaNodes.find(n => n.id === found.id);
-      if (gfaNode) {
-        infoHTML += `<br><em>Flipped: ${gfaNode.isFlipped ? 'Yes' : 'No'}</em>`;
-        infoHTML += `<br><em>Angle: ${(gfaNode.angle * 180 / Math.PI).toFixed(1)}°</em>`;
+    
+    // Check if this is a merged node
+    if (isMergedNode(found)) {
+      const mergedInfo = getMergedNodeInfo(found);
+      infoHTML += `<br><em>Type: ${mergedInfo.type}</em>`;
+      infoHTML += `<br><em>Merged from: ${mergedInfo.originalNodes.join(', ')}</em>`;
+      infoHTML += `<br><em>Original nodes: ${mergedInfo.nodeCount}</em>`;
+      infoHTML += `<br><em>Total length: ${mergedInfo.totalLength}bp</em>`;
+      infoHTML += `<br><em>Average depth: ${mergedInfo.averageDepth.toFixed(2)}</em>`;
+      infoHTML += `<br><em>Path: ${mergedInfo.pathName}</em>`;
+      infoHTML += `<br><br><em>Note: Click "Export Merged Sequence" to view the combined sequence</em>`;
+    } else {
+      // Regular node info
+      if (currentFormat === 'gfa' && nodes._gfaNodes) {
+        const gfaNode = nodes._gfaNodes.find(n => n.id === found.id);
+        if (gfaNode) {
+          infoHTML += `<br><em>Flipped: ${gfaNode.isFlipped ? 'Yes' : 'No'}</em>`;
+          infoHTML += `<br><em>Angle: ${(gfaNode.angle * 180 / Math.PI).toFixed(1)}°</em>`;
+        }
       }
-    }
 
-    // Add resolution info
-    const logicalConnections = getVertexConnections(found.id);
-    const physicalConnections = getPhysicalConnections(found.id);
-    infoHTML += `<br><em>Logical: ${logicalConnections.incoming.length} in, ${logicalConnections.outgoing.length} out</em>`;
-    infoHTML += `<br><em>Physical: ${physicalConnections.red.length} red, ${physicalConnections.green.length} green</em>`;
-    infoHTML += `<pre>${JSON.stringify(found,null,2)}</pre>`;
+      // Add resolution info
+      const logicalConnections = getVertexConnections(found.id);
+      const physicalConnections = getPhysicalConnections(found.id);
+      infoHTML += `<br><em>Logical: ${logicalConnections.incoming.length} in, ${logicalConnections.outgoing.length} out</em>`;
+      infoHTML += `<br><em>Physical: ${physicalConnections.red.length} red, ${physicalConnections.green.length} green</em>`;
+      infoHTML += `<pre>${JSON.stringify(found,null,2)}</pre>`;
+    }
     
     document.getElementById('infoContent').innerHTML = infoHTML;
     
     // DEBUG: Add pre-resolution debugging
     debugVertexConnections(found.id);
     
-    // Update resolve button states
+    // Update button states
     updateResolveButton();
     updatePhysicalResolveButton();
+    updateMergeButtons();
     
     drawGraph(ctx, canvas, transform, nodes, links, pinnedNodes, selected, currentFormat, highlightedPath);
   }
@@ -1347,6 +1485,8 @@ setupUI({
       showPhysicalResolveDialog(vertexId);
     }
   },
+  onMergeNodes: mergeSelectedNodes,
+  onExportMergedSequence: exportMergedSequence,
   onRedraw: startSimulation,
   onHighlightPath: (sequence, pathName) => highlightPaths(sequence, pathName),
   onClearPaths: clearAllPaths,
@@ -1406,6 +1546,7 @@ if (pathFileInput && importPathsBtn) {
         
         // Update the UI to reflect new paths
         updatePathUI();
+        updateMergeButtons();
         
         // Log summary
         const summary = `Import completed: ${results.successful.length} successful, ${results.failed.length} failed`;
@@ -1498,6 +1639,15 @@ document.addEventListener('keydown', (e) => {
 });
 
 // FIXED: Force create export button after page load
+// document.addEventListener('DOMContentLoaded', () => {
+//   console.log('DOM loaded, ensuring export button exists...');
+//   setTimeout(() => {
+//     if (!exportButton) {
+//       exportButton = createExportButton();
+//       console.log('Export button created on DOM load');
+//     }
+//   }, 100);
+// });
 
 // Make functions globally available for UI
 window.deletePath = deletePath;

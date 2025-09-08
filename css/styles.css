@@ -1,4 +1,4 @@
-/* Enhanced styles.css with improved path management layout */
+/* Enhanced styles.css with merge functionality and improved path management layout */
 
 /* --- Global layout --- */
 body, html {
@@ -92,6 +92,62 @@ canvas { display: block; }
 }
 
 #resolvePhysical:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+/* --- NEW: Merge Section Styles --- */
+.merge-section {
+  margin: 15px 0;
+  padding: 10px 0;
+  border-top: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+}
+
+.merge-section h4 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #333;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 5px;
+}
+
+#mergeNodes {
+  background: #6f42c1;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 5px;
+  font-size: 12px;
+}
+
+#mergeNodes:hover:not(:disabled) {
+  background: #5a32a3;
+}
+
+#mergeNodes:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+#exportMergedSequence {
+  background: #fd7e14;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 5px;
+  font-size: 12px;
+}
+
+#exportMergedSequence:hover:not(:disabled) {
+  background: #e8680a;
+}
+
+#exportMergedSequence:disabled {
   background: #6c757d;
   cursor: not-allowed;
 }
@@ -611,4 +667,45 @@ canvas { display: block; }
 .import-help {
   font-size: 10px;
   color: #666;
+}
+
+/* NEW: Merged node styling in info panel */
+.merged-node-info {
+  background: #e8f5e8;
+  border: 1px solid #4caf50;
+  border-radius: 4px;
+  padding: 10px;
+  margin: 10px 0;
+}
+
+.merged-node-info h4 {
+  margin: 0 0 8px 0;
+  color: #2e7d32;
+  font-size: 14px;
+}
+
+.merged-node-detail {
+  font-size: 12px;
+  margin: 4px 0;
+  color: #333;
+}
+
+.merged-node-list {
+  font-family: monospace;
+  font-size: 11px;
+  background: rgba(76, 175, 80, 0.1);
+  padding: 4px 8px;
+  border-radius: 2px;
+  margin: 4px 0;
+}
+
+/* Instructions styling updates */
+#mergeInstructions {
+  display: block;
+  margin-top: 15px;
+  padding: 10px;
+  background: #e8f5e8;
+  border: 1px solid #4caf50;
+  border-radius: 4px;
+  font-size: 12px;
 }

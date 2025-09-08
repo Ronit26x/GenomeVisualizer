@@ -9,6 +9,11 @@
 
 // ===== UTILITY FUNCTIONS =====
 
+// Check if a node is a merged node
+function isMergedNode(node) {
+  return node && node.gfaType === 'merged_segment' && node.mergedFrom;
+}
+
 // Generate reverse complement of DNA sequence
 function reverseComplement(sequence) {
   const complement = {
@@ -337,7 +342,12 @@ function findLinkForPathStepWithDiagnostics(nodeA, nodeB, links, preferredOrient
 // ===== SEQUENCE PROCESSING FUNCTIONS =====
 
 // Get node sequence in specified orientation
-function getNodeSequence(node, orientation = '+') {
+function getNodeSequence(node, orientation = '+', originalNodes = null, originalLinks = null) {
+  // Check if this is a merged node
+  if (isMergedNode(node)) {
+    return getMergedNodeSequence(node, originalNodes, originalLinks, orientation);
+  }
+  
   let sequence = node.seq || '';
   
   // Handle placeholder sequences
@@ -352,6 +362,47 @@ function getNodeSequence(node, orientation = '+') {
   }
   
   return sequence.toUpperCase();
+}
+
+function getMergedNodeSequence(mergedNode, originalNodes, originalLinks, orientation = '+') {
+  if (!isMergedNode(mergedNode)) {
+    return mergedNode.seq || '*';
+  }
+  
+  console.log(`Reconstructing merged node sequence: ${mergedNode.id}`);
+  console.log(`Original nodes: ${mergedNode.mergedFrom.join(' → ')}`);
+  
+  // Get the original node objects
+  const nodeMap = new Map();
+  if (originalNodes && originalNodes.length > 0) {
+    originalNodes.forEach(node => nodeMap.set(String(node.id).trim(), node));
+  } else if (mergedNode.originalNodes) {
+    mergedNode.originalNodes.forEach(node => nodeMap.set(String(node.id).trim(), node));
+  } else {
+    console.log(`No original node data available for merged node ${mergedNode.id}`);
+    return 'N'.repeat(mergedNode.length || 1000);
+  }
+  
+  const pathNodes = mergedNode.mergedFrom.map(id => nodeMap.get(String(id).trim())).filter(Boolean);
+  
+  if (pathNodes.length === 0) {
+    console.log(`No original nodes found for merged node ${mergedNode.id}`);
+    return 'N'.repeat(mergedNode.length || 1000);
+  }
+  
+  // Reconstruct the sequence from the original path
+  const reconstructionResult = reconstructSequenceFromPath(pathNodes, originalLinks || [], `Merged: ${mergedNode.pathName || mergedNode.id}`);
+  
+  let finalSequence = reconstructionResult.sequence || '';
+  
+  // Apply orientation
+  if (orientation === '-') {
+    finalSequence = reverseComplement(finalSequence);
+    console.log(`Applied reverse complement for negative orientation`);
+  }
+  
+  console.log(`Reconstructed sequence: ${finalSequence.length}bp`);
+  return finalSequence.toUpperCase();
 }
 
 // ENHANCED: Merge sequences with detailed diagnostics
@@ -1248,7 +1299,7 @@ export function exportPathSequence(pathData, nodes, links) {
     return;
   }
   
-  console.log('\n🚀 === ENHANCED DIAGNOSTIC GFA SEQUENCE EXPORT WITH INTELLIGENT START ===');
+  console.log('\n🚀 === DIAGNOSTIC GFA SEQUENCE EXPORT WITH MERGED NODE SUPPORT ===');
   console.log(`📋 Exporting path: ${pathData.name}`);
   console.log(`🔗 Path sequence: ${pathData.sequence}`);
   console.log(`📊 Available nodes: ${nodes.length}`);
@@ -1266,6 +1317,12 @@ export function exportPathSequence(pathData, nodes, links) {
   
   console.log(`✅ Processing ${pathNodes.length} nodes in exact order: ${pathNodes.map(n => n.id).join(' → ')}`);
   
+  // Check for merged nodes
+  const mergedNodes = pathNodes.filter(node => isMergedNode(node));
+  if (mergedNodes.length > 0) {
+    console.log(`🔗 Found ${mergedNodes.length} merged node(s): ${mergedNodes.map(n => n.id).join(', ')}`);
+  }
+  
   if (pathNodes.length >= 2) {
     console.log(`🎯 Will analyze first link: ${pathNodes[0].id} → ${pathNodes[1].id} for intelligent starting orientations`);
   }
@@ -1281,14 +1338,14 @@ export function exportPathSequence(pathData, nodes, links) {
     console.log(`  ... and ${links.length - 10} more links`);
   }
   
-  // Reconstruct sequence with enhanced intelligent starting orientation
-  const result = reconstructSequenceFromPath(pathNodes, links, pathData.name);
+  // Reconstruct sequence with enhanced diagnostic support and merged node handling
+  const result = reconstructSequenceFromPath(pathNodes, links, pathData.name, nodes, links);
   
   // Generate enhanced HTML report
   const htmlContent = generateSequenceReport(result);
   
-  // Download file with enhanced diagnostic suffix
-  const filename = `${pathData.name.replace(/[^a-zA-Z0-9]/g, '_')}_ENHANCED_DIAGNOSTIC_sequence.html`;
+  // Download file with diagnostic suffix
+  const filename = `${pathData.name.replace(/[^a-zA-Z0-9]/g, '_')}_DIAGNOSTIC_sequence.html`;
   const blob = new Blob([htmlContent], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
   
@@ -1300,19 +1357,46 @@ export function exportPathSequence(pathData, nodes, links) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   
-  console.log('\n🎉 === ENHANCED DIAGNOSTIC EXPORT COMPLETE ===');
+  console.log('\n🎉 === DIAGNOSTIC EXPORT COMPLETE ===');
   console.log(`📄 File: ${filename}`);
   console.log(`📏 Final sequence: ${result.totalLength.toLocaleString()}bp`);
-  console.log(`🎯 Final path: ${result.segments.map(s => `${s.nodeId}${s.orientation}`).join(' → ')}`);
-  console.log(`🧠 Intelligent start: ${result.diagnostics.intelligentStart ? 'SUCCESS' : 'FALLBACK USED'}`);
+  console.log(`🎯 Final path: ${result.segments.map(s => `${s.nodeId}${s.orientation}${s.isMerged ? '[M]' : ''}`).join(' → ')}`);
   
   if (result.diagnostics) {
     const successRate = ((result.diagnostics.perfectOverlaps + result.diagnostics.fuzzyOverlaps) / result.diagnostics.totalSteps * 100) || 0;
     console.log(`📊 Success rate: ${successRate.toFixed(1)}%`);
     console.log(`🔗 Links used: ${result.diagnostics.linksFound}/${result.diagnostics.totalSteps}`);
+    if (result.diagnostics.mergedNodesProcessed > 0) {
+      console.log(`🔗 Merged nodes processed: ${result.diagnostics.mergedNodesProcessed}`);
+    }
   }
   
   console.log(`\n💡 TIP: Check the browser console above for complete diagnostic output!`);
+}
+
+export function exportMergedNodeSequence(mergedNode, originalNodes, originalLinks) {
+  if (!mergedNode || !mergedNode.mergedFrom) {
+    throw new Error('Not a merged node');
+  }
+  
+  console.log(`Exporting merged node sequence: ${mergedNode.id}`);
+  
+  // Reconstruct the original path data for the sequence exporter
+  const pathData = {
+    name: `${mergedNode.pathName || 'Merged Node'} Sequence`,
+    sequence: mergedNode.mergedFrom.join(','),
+    nodes: new Set(mergedNode.mergedFrom),
+    edges: new Set() // Will be recalculated by exporter
+  };
+  
+  // Use the existing sequence exporter
+  try {
+    exportPathSequence(pathData, originalNodes, originalLinks);
+    console.log(`Successfully exported merged node sequence`);
+  } catch (error) {
+    console.error(`Error exporting merged node sequence:`, error);
+    throw error;
+  }
 }
 
 // Export helper functions for UI integration (unchanged from original)

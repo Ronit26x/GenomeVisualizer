@@ -1,4 +1,4 @@
-// Enhanced ui.js for multi-path management
+// Enhanced ui.js for multi-path management with merge functionality
 
 export function setupUI({
   canvas,
@@ -8,6 +8,8 @@ export function setupUI({
   onFlip,
   onResolve,
   onResolvePhysical,
+  onMergeNodes,
+  onExportMergedSequence,
   onRedraw,
   onHighlightPath,
   onClearPaths,
@@ -42,6 +44,16 @@ export function setupUI({
   // Physical resolve button
   if (document.getElementById('resolvePhysical') && onResolvePhysical) {
     document.getElementById('resolvePhysical').onclick = onResolvePhysical;
+  }
+  
+  // NEW: Merge nodes button
+  if (document.getElementById('mergeNodes') && onMergeNodes) {
+    document.getElementById('mergeNodes').onclick = onMergeNodes;
+  }
+  
+  // NEW: Export merged sequence button
+  if (document.getElementById('exportMergedSequence') && onExportMergedSequence) {
+    document.getElementById('exportMergedSequence').onclick = onExportMergedSequence;
   }
   
   document.getElementById('redraw').onclick = onRedraw;
@@ -165,6 +177,28 @@ export function setupUI({
       case 'Escape':
         e.preventDefault();
         onClearPaths();
+        break;
+      case 'm':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          if (onMergeNodes) {
+            const mergeBtn = document.getElementById('mergeNodes');
+            if (mergeBtn && !mergeBtn.disabled) {
+              onMergeNodes();
+            }
+          }
+        }
+        break;
+      case 'x':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          if (onExportMergedSequence) {
+            const exportBtn = document.getElementById('exportMergedSequence');
+            if (exportBtn && !exportBtn.disabled) {
+              onExportMergedSequence();
+            }
+          }
+        }
         break;
     }
   });
