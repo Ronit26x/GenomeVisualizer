@@ -1,4 +1,4 @@
-/* Enhanced styles.css with merge functionality and improved path management layout */
+/* Enhanced styles.css with linear chain merge functionality and improved path management layout */
 
 /* --- Global layout --- */
 body, html {
@@ -96,7 +96,7 @@ canvas { display: block; }
   cursor: not-allowed;
 }
 
-/* --- NEW: Merge Section Styles --- */
+/* --- ENHANCED: Linear Chain Merge Section Styles --- */
 .merge-section {
   margin: 15px 0;
   padding: 10px 0;
@@ -120,16 +120,27 @@ canvas { display: block; }
   border-radius: 4px;
   cursor: pointer;
   margin-bottom: 5px;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: bold;
+  text-align: center;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
 }
 
 #mergeNodes:hover:not(:disabled) {
   background: #5a32a3;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(111, 66, 193, 0.3);
 }
 
 #mergeNodes:disabled {
   background: #6c757d;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 #exportMergedSequence {
@@ -140,16 +151,44 @@ canvas { display: block; }
   border-radius: 4px;
   cursor: pointer;
   margin-bottom: 5px;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: bold;
+  transition: all 0.2s ease;
 }
 
 #exportMergedSequence:hover:not(:disabled) {
   background: #e8680a;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(253, 126, 20, 0.3);
 }
 
 #exportMergedSequence:disabled {
   background: #6c757d;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Animation for merge button when enabled */
+@keyframes pulse-merge {
+  0% { box-shadow: 0 0 0 0 rgba(111, 66, 193, 0.7); }
+  70% { box-shadow: 0 0 0 6px rgba(111, 66, 193, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(111, 66, 193, 0); }
+}
+
+#mergeNodes:not(:disabled):hover {
+  animation: pulse-merge 1.5s infinite;
+}
+
+/* Visual indicator for linear chain nodes (optional - can be added to renderer) */
+.linear-chain-node {
+  border: 2px dashed #6f42c1 !important;
+  background: rgba(111, 66, 193, 0.1) !important;
+}
+
+.branch-node {
+  border: 2px solid #dc3545 !important;
+  background: rgba(220, 53, 69, 0.1) !important;
 }
 
 /* --- UPDATED: Path Management Styles --- */
@@ -262,6 +301,7 @@ canvas { display: block; }
   flex: 1;
   min-width: 0;
 }
+
 /* Specific button styles */
 .export-paths-btn {
   background: #6f42c1;
@@ -281,7 +321,6 @@ canvas { display: block; }
   background: #138496;
 }
 
-
 .clear-all-btn {
   background: #dc3545;
   color: white;
@@ -290,7 +329,6 @@ canvas { display: block; }
 .clear-all-btn:hover:not(:disabled) {
   background: #c82333;
 }
-
 
 /* Disabled state for all action buttons */
 .nav-header-actions button:disabled {
@@ -313,11 +351,10 @@ canvas { display: block; }
   display: flex;
   align-items: center;
   gap: 3px;
-  /* Remove justify-content: center and padding to align with paths */
   background: #f8f9fa;
   border-radius: 4px;
   border: 1px solid #dee2e6;
-  padding: 6px 3px; /* Reduce padding */
+  padding: 6px 3px;
 }
 
 .nav-btn {
@@ -330,7 +367,6 @@ canvas { display: block; }
   cursor: pointer;
   margin-bottom: 0;
   width: auto;
-  /* Remove flex-shrink: 0 to allow buttons to align properly */
 }
 
 .nav-btn:hover:not(:disabled) {
@@ -351,9 +387,9 @@ canvas { display: block; }
   padding: 5px 8px;
   border-radius: 3px;
   border: 1px solid #dee2e6;
-  margin: 0 2px; /* Reduce margin to align with path cards */
+  margin: 0 2px;
   font-weight: 500;
-  min-width: 0; /* Allow text to wrap/truncate */
+  min-width: 0;
 }
 
 /* Keyboard shortcuts - move to bottom */
@@ -669,19 +705,21 @@ canvas { display: block; }
   color: #666;
 }
 
-/* NEW: Merged node styling in info panel */
+/* ENHANCED: Merged node styling in info panel */
 .merged-node-info {
-  background: #e8f5e8;
-  border: 1px solid #4caf50;
-  border-radius: 4px;
-  padding: 10px;
+  background: linear-gradient(135deg, #e8f5e8 0%, #d4edda 100%);
+  border: 2px solid #4caf50;
+  border-radius: 6px;
+  padding: 12px;
   margin: 10px 0;
+  box-shadow: 0 2px 4px rgba(76, 175, 80, 0.1);
 }
 
 .merged-node-info h4 {
   margin: 0 0 8px 0;
   color: #2e7d32;
   font-size: 14px;
+  font-weight: bold;
 }
 
 .merged-node-detail {
@@ -693,19 +731,107 @@ canvas { display: block; }
 .merged-node-list {
   font-family: monospace;
   font-size: 11px;
-  background: rgba(76, 175, 80, 0.1);
-  padding: 4px 8px;
-  border-radius: 2px;
-  margin: 4px 0;
+  background: rgba(76, 175, 80, 0.15);
+  padding: 6px 8px;
+  border-radius: 3px;
+  margin: 6px 0;
+  border: 1px solid rgba(76, 175, 80, 0.3);
 }
 
-/* Instructions styling updates */
+/* ENHANCED: Linear Chain Merging Instructions styling */
 #mergeInstructions {
   display: block;
   margin-top: 15px;
-  padding: 10px;
-  background: #e8f5e8;
-  border: 1px solid #4caf50;
-  border-radius: 4px;
+  padding: 12px;
+  background: linear-gradient(135deg, #e8f5e8 0%, #d4edda 100%);
+  border: 2px solid #4caf50;
+  border-radius: 6px;
   font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 2px 4px rgba(76, 175, 80, 0.1);
+}
+
+#mergeInstructions strong {
+  color: #2e7d32;
+  font-weight: bold;
+}
+
+/* Merge result indicator */
+.merge-success-indicator {
+  background: #d4edda;
+  border: 1px solid #c3e6cb;
+  color: #155724;
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin: 10px 0;
+  font-size: 12px;
+  animation: fadeInScale 0.5s ease-out;
+}
+
+@keyframes fadeInScale {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Linear chain visualization hints (for future use) */
+.chain-detection-preview {
+  background: rgba(111, 66, 193, 0.1);
+  border: 2px dashed #6f42c1;
+  border-radius: 4px;
+  padding: 8px;
+  margin: 8px 0;
+  font-size: 11px;
+  color: #6f42c1;
+  font-weight: bold;
+  text-align: center;
+}
+
+.chain-node-preview {
+  display: inline-block;
+  background: #6f42c1;
+  color: white;
+  padding: 2px 6px;
+  margin: 0 2px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.branch-indicator {
+  color: #dc3545;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 1200px) {
+  #app {
+    grid-template-columns: 200px 1fr 230px;
+  }
+  
+  .nav-header-actions button {
+    font-size: 8px;
+    padding: 3px 5px;
+  }
+  
+  #mergeNodes, #exportMergedSequence {
+    font-size: 10px;
+    padding: 6px 10px;
+  }
+}
+
+@media (max-width: 900px) {
+  #app {
+    grid-template-columns: 180px 1fr 200px;
+  }
+  
+  #mergeInstructions {
+    font-size: 11px;
+    padding: 10px;
+  }
 }

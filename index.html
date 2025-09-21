@@ -125,12 +125,14 @@
       
       <!-- NEW: Merge Instructions -->
       <div id="mergeInstructions" style="display: block; margin-top: 15px; padding: 10px; background: #e8f5e8; border: 1px solid #4caf50; border-radius: 4px; font-size: 12px;">
-        <strong>Node Merging:</strong><br>
-        • <strong>Select a path</strong> with 2+ nodes<br>
-        • Use <strong>Merge Selected Nodes</strong> to combine them<br>
-        • <strong>Export Merged Sequence</strong> to view combined sequence<br>
-        • Merged nodes preserve external connections<br>
-        • Click merged node to see merge details
+        <strong>🔗 Linear Chain Merging:</strong><br>
+        • <strong>Select any single node</strong> in a linear chain<br>
+        • Use <strong>Merge Linear Chain</strong> to automatically detect and merge<br>
+        • <strong>Algorithm traces backwards and forwards</strong> from selected node<br>
+        • Only merges non-branching nodes (1 in + 1 out connections)<br>
+        • <strong>Stops at branch points</strong> (nodes with multiple connections)<br>
+        • <strong>Preserves external connections</strong> to/from the chain<br>
+        • Click merged node to see chain details and export sequence
       </div>
     </div>
     <div id="viz">

@@ -10,7 +10,7 @@ import { updatePathsAfterResolution, showPathUpdateSummary } from './path-update
 import { showPathUpdateDialog, markUpdatedPathsInUI, addPathUpdateStyles } from './path-update-ui.js';
 import { setupUI }                  from './ui.js';
 import { exportPathSequence, addExportButton } from './sequence-exporter.js';
-import { mergeNodesFromPath, exportMergedNodeSequence, isMergedNode, getMergedNodeInfo, updatePathsAfterMerge } from './node-merger.js';
+import { mergeNodesFromPath, exportMergedNodeSequence, isMergedNode, getMergedNodeInfo, updatePathsAfterMerge, mergeLinearChainFromNode } from './node-merger.js';
 
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
@@ -173,31 +173,23 @@ function flipSelected() {
 
 // NEW: Merge selected nodes from current path
 function mergeSelectedNodes() {
-  if (currentPathIndex < 0 || currentPathIndex >= savedPaths.length) {
-    alert('Please select a path first before merging nodes');
-    logEvent('No path selected for node merging');
+  if (selected.nodes.size !== 1) {
+    alert('Please select exactly one node to start linear chain detection');
+    logEvent('Linear chain merge requires exactly one selected node');
     return;
   }
   
-  const currentPath = savedPaths[currentPathIndex];
-  const pathNodeIds = currentPath.sequence.split(',').map(id => id.trim());
+  const selectedNodeId = Array.from(selected.nodes)[0];
+  const selectedNode = nodes.find(n => n.id === selectedNodeId);
   
-  if (pathNodeIds.length < 2) {
-    alert('Path must contain at least 2 nodes to merge');
-    logEvent('Path too short for merging');
+  if (!selectedNode) {
+    alert('Selected node not found');
+    logEvent('Selected node not found in graph');
     return;
   }
   
   try {
-    logEvent(`Starting merge of ${pathNodeIds.length} nodes from path "${currentPath.name}"`);
-    
-    // Get node objects for the path
-    const nodeMap = new Map(nodes.map(n => [String(n.id), n]));
-    const pathNodes = pathNodeIds.map(id => nodeMap.get(String(id))).filter(Boolean);
-    
-    if (pathNodes.length !== pathNodeIds.length) {
-      throw new Error('Some nodes in the path were not found in the graph');
-    }
+    logEvent(`Starting linear chain detection from node: ${selectedNode.id}`);
     
     // Store original state for undo
     history.push({
@@ -206,8 +198,8 @@ function mergeSelectedNodes() {
     });
     if (history.length > 20) history.shift();
     
-    // Perform the merge
-    const mergeResult = mergeNodesFromPath(pathNodes, nodes, links, currentPath.name);
+    // Use the new linear chain detection
+    const mergeResult = mergeLinearChainFromNode(selectedNode, nodes, links);
     
     if (mergeResult.success) {
       // Update the graph
@@ -221,7 +213,7 @@ function mergeSelectedNodes() {
       // Update saved paths to reflect the merge
       savedPaths = updatePathsAfterMerge(savedPaths, mergeResult);
       
-      // Clear current path selection since it's been merged
+      // Clear current path selection since nodes may have been merged
       currentPathIndex = -1;
       highlightedPath.nodes.clear();
       highlightedPath.edges.clear();
@@ -237,17 +229,18 @@ function mergeSelectedNodes() {
       // Restart simulation
       startSimulation();
       
-      logEvent(`✅ Successfully merged ${mergeResult.removedNodes} nodes into ${mergeResult.mergedNodeId}`);
+      logEvent(`✅ Successfully merged linear chain: ${mergeResult.originalNodeIds.join(' → ')} into ${mergeResult.mergedNodeId}`);
+      logEvent(`   Chain length: ${mergeResult.removedNodes} nodes`);
       logEvent(`   Preserved ${mergeResult.externalConnections} external connections`);
       
     } else {
-      throw new Error('Merge operation failed');
+      throw new Error('Linear chain merge operation failed');
     }
     
   } catch (error) {
-    console.error('Error during node merge:', error);
-    alert(`Error merging nodes: ${error.message}`);
-    logEvent(`❌ Merge failed: ${error.message}`);
+    console.error('Error during linear chain merge:', error);
+    alert(`Error merging linear chain: ${error.message}`);
+    logEvent(`❌ Linear chain merge failed: ${error.message}`);
   }
 }
 
@@ -293,19 +286,17 @@ function updateMergeButtons() {
   const mergeBtn = document.getElementById('mergeNodes');
   const exportMergedBtn = document.getElementById('exportMergedSequence');
   
-  // Merge button: enabled when a path with 2+ nodes is selected
+  // Merge button: enabled when exactly one node is selected
   if (mergeBtn) {
-    const hasValidPath = currentPathIndex >= 0 && 
-                        currentPathIndex < savedPaths.length &&
-                        savedPaths[currentPathIndex].sequence.split(',').length >= 2;
+    const hasValidSelection = selected.nodes.size === 1;
     
-    mergeBtn.disabled = !hasValidPath;
+    mergeBtn.disabled = !hasValidSelection;
     
-    if (hasValidPath) {
-      const nodeCount = savedPaths[currentPathIndex].sequence.split(',').length;
-      mergeBtn.textContent = `Merge Selected Nodes (${nodeCount})`;
+    if (hasValidSelection) {
+      const selectedNodeId = Array.from(selected.nodes)[0];
+      mergeBtn.textContent = `Merge Linear Chain from ${selectedNodeId}`;
     } else {
-      mergeBtn.textContent = 'Merge Selected Nodes';
+      mergeBtn.textContent = 'Merge Linear Chain';
     }
   }
   
@@ -317,7 +308,6 @@ function updateMergeButtons() {
     exportMergedBtn.disabled = !hasSelectedMergedNode;
   }
 }
-
 // DEBUG: Pre-resolution debugging function
 function debugVertexConnections(vertexId) {
   console.log('=== PRE-RESOLUTION DEBUG ===');
