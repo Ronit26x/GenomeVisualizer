@@ -3,16 +3,16 @@
 /**
  * Updates all saved paths after a vertex resolution operation
  */
-export function updatePathsAfterResolution(savedPaths, resolutionData) {
+export function updatePathsAfterResolution(savedPaths, resolutionData, nodes, links) {
   const { originalVertex, newVertices, resolutionType } = resolutionData;
   const updatedPaths = [];
-  
+
   console.log(`=== FULL DEBUG PATH UPDATE ===`);
   console.log(`Original vertex: "${originalVertex.id}"`);
   console.log(`New vertices: ${newVertices.map(v => v.id).join(', ')}`);
-  
+
   // FIRST: Show the complete graph state
-  debugGraphState();
+  debugGraphState(nodes, links);
   
   savedPaths.forEach((path, pathIndex) => {
     const pathSequence = path.sequence.split(',').map(id => id.trim());
@@ -32,17 +32,17 @@ export function updatePathsAfterResolution(savedPaths, resolutionData) {
     
     // Try each replacement vertex with full debugging
     let foundReplacement = null;
-    
+
     for (let i = 0; i < newVertices.length; i++) {
       const newVertex = newVertices[i];
       const testSequence = [...pathSequence];
       testSequence[resolvedIndex] = newVertex.id;
-      
+
       console.log(`\n--- TESTING REPLACEMENT ${i + 1}/${newVertices.length}: "${newVertex.id}" ---`);
       console.log(`Test sequence: [${testSequence.map(id => `"${id}"`).join(', ')}]`);
-      
-      const isValid = debugPathValidation(testSequence);
-      
+
+      const isValid = debugPathValidation(testSequence, links);
+
       if (isValid) {
         console.log(`✓ FOUND VALID REPLACEMENT: ${newVertex.id}`);
         foundReplacement = newVertex;
@@ -66,7 +66,7 @@ export function updatePathsAfterResolution(savedPaths, resolutionData) {
         originalCoreVertex: originalVertex.id
       };
       
-      recalculatePathEdges(updatedPath);
+      recalculatePathEdges(updatedPath, links);
       updatedPaths.push(updatedPath);
       
       console.log(`✓ PATH SUCCESSFULLY UPDATED`);
@@ -81,31 +81,31 @@ export function updatePathsAfterResolution(savedPaths, resolutionData) {
 /**
  * Show complete graph state for debugging
  */
-function debugGraphState() {
+function debugGraphState(nodes, links) {
   console.log(`\n=== GRAPH STATE DEBUG ===`);
-  
-  if (!window.nodes) {
-    console.log(`ERROR: No window.nodes available`);
+
+  if (!nodes) {
+    console.log(`ERROR: No nodes provided`);
     return;
   }
-  
-  if (!window.links) {
-    console.log(`ERROR: No window.links available`);
+
+  if (!links) {
+    console.log(`ERROR: No links provided`);
     return;
   }
-  
-  console.log(`Total nodes: ${window.nodes.length}`);
-  console.log(`Total links: ${window.links.length}`);
-  
+
+  console.log(`Total nodes: ${nodes.length}`);
+  console.log(`Total links: ${links.length}`);
+
   // Show all nodes
   console.log(`\nAll nodes in graph:`);
-  window.nodes.forEach((node, i) => {
+  nodes.forEach((node, i) => {
     console.log(`  ${i}: "${node.id}" (type: ${typeof node.id})`);
   });
-  
+
   // Show all links
   console.log(`\nAll links in graph:`);
-  window.links.forEach((link, i) => {
+  links.forEach((link, i) => {
     const sourceId = link.source.id || link.source;
     const targetId = link.target.id || link.target;
     console.log(`  ${i}: "${sourceId}" → "${targetId}" (types: ${typeof sourceId}, ${typeof targetId})`);
@@ -135,24 +135,24 @@ function debugRequiredConnections(pathSequence, resolvedIndex) {
 /**
  * Debug path validation with detailed edge checking
  */
-function debugPathValidation(testSequence) {
+function debugPathValidation(testSequence, links) {
   console.log(`Validating path: [${testSequence.map(id => `"${id}"`).join(', ')}]`);
-  
+
   if (testSequence.length < 2) {
     console.log(`Single node path - automatically valid`);
     return true;
   }
-  
+
   // Check each consecutive pair
   for (let i = 0; i < testSequence.length - 1; i++) {
     const nodeA = normalizeId(testSequence[i]);
     const nodeB = normalizeId(testSequence[i + 1]);
-    
+
     console.log(`\n  Checking connection ${i}: "${nodeA}" → "${nodeB}"`);
-    
+
     // Find all edges involving these nodes
-    const relevantEdges = findRelevantEdges(nodeA, nodeB);
-    
+    const relevantEdges = findRelevantEdges(nodeA, nodeB, links);
+
     if (relevantEdges.length === 0) {
       console.log(`    ✗ NO EDGES FOUND between these nodes`);
       return false;
@@ -163,7 +163,7 @@ function debugPathValidation(testSequence) {
       });
     }
   }
-  
+
   console.log(`  ✓ All connections verified`);
   return true;
 }
@@ -171,18 +171,18 @@ function debugPathValidation(testSequence) {
 /**
  * Find all edges that could connect two nodes
  */
-function findRelevantEdges(nodeA, nodeB) {
-  if (!window.links) return [];
-  
+function findRelevantEdges(nodeA, nodeB, links) {
+  if (!links) return [];
+
   const normalizedA = normalizeId(nodeA);
   const normalizedB = normalizeId(nodeB);
-  
+
   const relevantEdges = [];
-  
-  window.links.forEach((link, index) => {
+
+  links.forEach((link, index) => {
     const linkSourceId = normalizeId(link.source.id || link.source);
     const linkTargetId = normalizeId(link.target.id || link.target);
-    
+
     // Check both directions
     if ((linkSourceId === normalizedA && linkTargetId === normalizedB) ||
         (linkSourceId === normalizedB && linkTargetId === normalizedA)) {
@@ -194,7 +194,7 @@ function findRelevantEdges(nodeA, nodeB) {
       });
     }
   });
-  
+
   return relevantEdges;
 }
 
@@ -208,27 +208,27 @@ function normalizeId(id) {
 /**
  * Recalculate edges for an updated path
  */
-function recalculatePathEdges(updatedPath) {
-  if (!window.links) return;
-  
+function recalculatePathEdges(updatedPath, links) {
+  if (!links) return;
+
   const nodeIds = updatedPath.sequence.split(',').map(id => normalizeId(id.trim()));
   const pathEdges = new Set();
-  
+
   for (let i = 0; i < nodeIds.length - 1; i++) {
     const sourceId = nodeIds[i];
     const targetId = nodeIds[i + 1];
-    
-    window.links.forEach((link, index) => {
+
+    links.forEach((link, index) => {
       const linkSourceId = normalizeId(link.source.id || link.source);
       const linkTargetId = normalizeId(link.target.id || link.target);
-      
+
       if ((linkSourceId === sourceId && linkTargetId === targetId) ||
           (linkSourceId === targetId && linkTargetId === sourceId)) {
         pathEdges.add(index);
       }
     });
   }
-  
+
   updatedPath.edges = pathEdges;
   console.log(`Recalculated ${pathEdges.size} edges`);
 }

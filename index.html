@@ -8,6 +8,41 @@
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://unpkg.com/graphlib@2.1.8/dist/graphlib.min.js"></script>
   <script src="https://unpkg.com/graphlib-dot@0.6.2/dist/graphlib-dot.min.js"></script>
+
+  <!-- MVC Architecture Initialization -->
+  <script type="module">
+    import { GraphModel } from './js/core/GraphModel.js?v=1';
+    import { GraphView } from './js/core/GraphView.js?v=1';
+    import { GraphController } from './js/core/GraphController.js?v=1';
+    import { LayoutManager } from './js/core/LayoutManager.js?v=2';
+
+    // Wait for DOM to be ready
+    window.addEventListener('DOMContentLoaded', () => {
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+
+      // Initialize MVC system
+      window.graphApp = {
+        model: new GraphModel(),
+        view: new GraphView(canvas, ctx),
+        layout: null,
+        controller: null
+      };
+
+      // Initialize layout manager with model
+      window.graphApp.layout = new LayoutManager(window.graphApp.model);
+
+      // Initialize controller with model, view, and layout
+      window.graphApp.controller = new GraphController(
+        window.graphApp.model,
+        window.graphApp.view,
+        window.graphApp.layout
+      );
+
+      console.log('[MVC] Architecture initialized');
+    });
+  </script>
+
   <script type="module" src="js/main.js"></script>
 </head>
 <body>
