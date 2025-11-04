@@ -171,10 +171,61 @@ export class GfaParser extends Parser {
             }
             break;
 
+          // Custom tags for merged nodes
+          case 'MG': // Merged node marker
+            if (tagValue === 'merged') {
+              node.gfaType = 'merged_segment';
+              node.type = 'merged';
+            }
+            break;
+
+          case 'MF': // Merged from (original node IDs)
+            node.mergedFrom = tagValue.split(',').filter(id => id.length > 0);
+            break;
+
+          case 'PN': // Path name
+            node.pathName = tagValue;
+            break;
+
+          case 'ON': // Original nodes (JSON)
+            try {
+              const originalNodes = JSON.parse(tagValue);
+              node.originalNodes = originalNodes;
+              // Calculate total length
+              node.totalLength = originalNodes.reduce((sum, n) => sum + (n.length || 0), 0);
+            } catch (e) {
+              console.warn('Failed to parse original nodes JSON:', e);
+            }
+            break;
+
+          case 'OL': // Original links (JSON)
+            try {
+              const originalLinks = JSON.parse(tagValue);
+              // Expand compact link format back to full format
+              node.originalLinks = originalLinks.map(l => ({
+                source: l.s,
+                target: l.t,
+                srcOrientation: l.so || '+',
+                tgtOrientation: l.to || '+',
+                overlap: l.o || '*',
+                gfaType: 'link'
+              }));
+            } catch (e) {
+              console.warn('Failed to parse original links JSON:', e);
+            }
+            break;
+
           default:
             node[tagName] = tagValue;
         }
       }
+    }
+
+    // Set node count and average depth for merged nodes
+    if (node.type === 'merged' && node.originalNodes) {
+      node.nodeCount = node.originalNodes.length;
+      const totalDepth = node.originalNodes.reduce((sum, n) => sum + (n.depth || 0), 0);
+      node.averageDepth = node.nodeCount > 0 ? totalDepth / node.nodeCount : node.depth;
     }
 
     return node;

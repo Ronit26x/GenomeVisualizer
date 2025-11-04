@@ -13,6 +13,7 @@ import { NodeMerger } from './operations/NodeMerger.js';
 import { VertexResolution } from './operations/VertexResolution.js';
 import { PhysicalVertexResolution } from './operations/PhysicalVertexResolution.js';
 import { exportMergedNodeSequence, isMergedNode, getMergedNodeInfo, updatePathsAfterMerge } from './operations/node-merger-utils.js';
+import { exportGraphToGfa } from './utils/exporters/GfaExporter.js';
 
 // ===== MVC SYSTEM INITIALIZATION =====
 
@@ -121,6 +122,34 @@ function setupUIHandlers() {
   // Undo
   document.getElementById('undo').onclick = () => {
     controller.undo();
+  };
+
+  // Download GFA
+  document.getElementById('downloadGfa').onclick = () => {
+    if (model.nodes.length === 0) {
+      alert('No graph loaded. Please load a graph first.');
+      return;
+    }
+
+    try {
+      const result = exportGraphToGfa(model.nodes, model.links, {
+        includeHeader: true,
+        expandMergedNodes: false, // Keep merged nodes as merged (not expanded)
+        includeOptionalTags: true
+      });
+
+      logEvent(`GFA exported: ${result.segmentCount} segments, ${result.linkCount} links`);
+      logEvent(`Downloaded as: ${result.filename} (${result.size} bytes)`);
+
+      // Show success message
+      setTimeout(() => {
+        alert(`Successfully exported GFA file:\n\n${result.filename}\n\nSegments: ${result.segmentCount}\nLinks: ${result.linkCount}\nSize: ${result.size} bytes`);
+      }, 100);
+    } catch (error) {
+      console.error('Error exporting GFA:', error);
+      alert(`Error exporting GFA: ${error.message}`);
+      logEvent(`GFA export failed: ${error.message}`);
+    }
   };
 
   // Node click for selection and info display
