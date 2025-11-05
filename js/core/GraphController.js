@@ -19,6 +19,9 @@ export class GraphController extends EventEmitter {
     // Drag state
     this._dragState = null;
 
+    // Track first node click for one-time warm start
+    this._firstNodeClickAfterLoad = true;
+
     this._setupViewListeners();
     this._setupModelListeners();
   }
@@ -143,6 +146,38 @@ export class GraphController extends EventEmitter {
       this.model.selectNodes(nodeId, { additive: false });
     }
 
+    // One-time warm start on first node click
+    if (this._firstNodeClickAfterLoad && this.layoutManager.simulation) {
+      console.log('[GraphController] First click - starting warm start (4000 ticks)');
+
+      const sim = this.layoutManager.simulation;
+
+      // Run ticks in batches using requestAnimationFrame for smooth UI
+      let tickCount = 0;
+      const totalTicks = 4000;
+      const ticksPerFrame = 50; // Process 50 ticks per frame
+
+      const runTickBatch = () => {
+        // Run a batch of ticks
+        for (let i = 0; i < ticksPerFrame && tickCount < totalTicks; i++) {
+          sim.tick();
+          tickCount++;
+        }
+
+        // Continue if more ticks needed
+        if (tickCount < totalTicks) {
+          requestAnimationFrame(runTickBatch);
+        } else {
+          // Done with warm start - restart with faster decay to settle quickly
+          sim.alpha(0.3).alphaDecay(0.1).restart();
+          console.log('[GraphController] Warm start complete');
+        }
+      };
+
+      runTickBatch();
+      this._firstNodeClickAfterLoad = false;
+    }
+
     // Emit controller event for UI updates
     this.emit('nodeClicked', { nodeId, selected: this.model.selectedNodes.has(nodeId) });
   }
@@ -200,6 +235,9 @@ export class GraphController extends EventEmitter {
    */
   loadGraph(nodes, links, format) {
     this.model.loadGraph(nodes, links, format);
+
+    // Reset first click flag on new graph load
+    this._firstNodeClickAfterLoad = true;
 
     // Start layout simulation
     const center = this.view.getCanvasCenter();

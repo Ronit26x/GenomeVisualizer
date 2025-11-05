@@ -17,9 +17,16 @@ export function updatePathsAfterResolution(savedPaths, resolutionData, nodes, li
   savedPaths.forEach((path, pathIndex) => {
     const pathSequence = path.sequence.split(',').map(id => id.trim());
     const resolvedIndex = pathSequence.findIndex(id => normalizeId(id) === normalizeId(originalVertex.id));
-    
+
     if (resolvedIndex === -1) {
-      updatedPaths.push({ ...path });
+      // Path doesn't contain resolved vertex - but must recalculate edges since graph structure changed
+      const unchangedPath = {
+        ...path,
+        nodes: new Set(path.nodes),
+        edges: new Set()
+      };
+      recalculatePathEdges(unchangedPath, links);
+      updatedPaths.push(unchangedPath);
       return;
     }
     
