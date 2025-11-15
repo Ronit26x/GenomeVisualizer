@@ -118,6 +118,13 @@ export class GraphController extends EventEmitter {
       this.view.render();
     });
 
+    this.model.on('visualizationOptionChanged', ({ option, value }) => {
+      if (option === 'showComponentBounds') {
+        this.view.updateShowComponentBounds(value);
+        this.view.render();
+      }
+    });
+
     this.model.on('stateRestored', () => {
       // Undo was performed - sync all view state
       this.view.updateNodes(this.model.nodes);
@@ -361,6 +368,13 @@ export class GraphController extends EventEmitter {
     const links = d3.range(nodeCount - 1).map(i => ({ source: i, target: i + 1 }));
 
     this.loadGraph(nodes, links, 'dot');
+  }
+
+  /**
+   * Toggle component bounds visualization
+   */
+  toggleComponentBounds() {
+    return this.model.toggleComponentBounds();
   }
 
   // ===== COMPLEX OPERATIONS (to be implemented) =====

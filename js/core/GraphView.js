@@ -42,6 +42,9 @@ export class GraphView extends EventEmitter {
     this._dragNode = null;
     this._dragStartPos = null;
 
+    // Visualization options
+    this._showComponentBounds = false;
+
     // Initialize MVC renderers
     this._dotRenderer = new DotRenderer();
     this._gfaRenderer = new GfaRenderer();
@@ -87,6 +90,9 @@ export class GraphView extends EventEmitter {
   render() {
     if (!this.canvas || !this.ctx) return;
 
+    // Calculate connected components and their bounding boxes
+    const componentBounds = this._calculateComponentBounds();
+
     const renderData = {
       nodes: this._nodes,
       edges: this._links,
@@ -94,7 +100,9 @@ export class GraphView extends EventEmitter {
       selection: { nodes: this._selectedNodes, edges: this._selectedEdges },
       pinnedNodes: this._pinnedNodes,
       highlightedPath: this._highlightedPath,
-      scaleFactor: 1.0
+      scaleFactor: 1.0,
+      componentBounds: componentBounds,
+      showComponentBounds: this._showComponentBounds
     };
 
     // Route to appropriate renderer based on format
@@ -103,6 +111,131 @@ export class GraphView extends EventEmitter {
     } else {
       this._dotRenderer.render(renderData);
     }
+  }
+
+  /**
+   * Calculate bounding boxes for connected components
+   */
+  _calculateComponentBounds() {
+    // Build adjacency information
+    const visited = new Set();
+    const components = [];
+
+    // Helper function to perform DFS
+    const dfs = (nodeId, component) => {
+      if (visited.has(nodeId)) return;
+      visited.add(nodeId);
+      component.push(nodeId);
+
+      // Find all connected nodes
+      this._links.forEach(link => {
+        const sourceId = String(link.source?.id || link.source);
+        const targetId = String(link.target?.id || link.target);
+
+        if (sourceId === String(nodeId) && !visited.has(targetId)) {
+          dfs(targetId, component);
+        } else if (targetId === String(nodeId) && !visited.has(sourceId)) {
+          dfs(sourceId, component);
+        }
+      });
+    };
+
+    // Find all connected components
+    this._nodes.forEach(node => {
+      if (!visited.has(node.id)) {
+        const component = [];
+        dfs(node.id, component);
+        components.push(component);
+      }
+    });
+
+    // Calculate bounding boxes for each component with padding
+    const bounds = [];
+    components.forEach(componentNodeIds => {
+      const nodes = componentNodeIds.map(id =>
+        this._nodes.find(n => n.id === id)
+      ).filter(n => n && n.x !== undefined && n.y !== undefined);
+
+      if (nodes.length === 0) return;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+      // For GFA format, we need to consider the node dimensions
+      if (this._format === 'gfa') {
+        // Get GFA visual nodes from renderer
+        const gfaNodes = nodes.map(node =>
+          this._gfaRenderer.gfaVisualNodes.find(gn => gn.id === node.id)
+        ).filter(gn => gn);
+
+        if (gfaNodes.length > 0) {
+          gfaNodes.forEach(gfaNode => {
+            // Calculate bounds considering the node's length and width
+            const halfLength = gfaNode.drawnLength / 2;
+            const halfWidth = gfaNode.width / 2;
+            const cos = Math.cos(gfaNode.angle);
+            const sin = Math.sin(gfaNode.angle);
+
+            // Calculate the 4 corners of the rectangular node
+            const corners = [
+              { x: gfaNode.x - cos * halfLength - sin * halfWidth, y: gfaNode.y - sin * halfLength + cos * halfWidth },
+              { x: gfaNode.x - cos * halfLength + sin * halfWidth, y: gfaNode.y - sin * halfLength - cos * halfWidth },
+              { x: gfaNode.x + cos * halfLength - sin * halfWidth, y: gfaNode.y + sin * halfLength + cos * halfWidth },
+              { x: gfaNode.x + cos * halfLength + sin * halfWidth, y: gfaNode.y + sin * halfLength - cos * halfWidth }
+            ];
+
+            corners.forEach(corner => {
+              minX = Math.min(minX, corner.x);
+              minY = Math.min(minY, corner.y);
+              maxX = Math.max(maxX, corner.x);
+              maxY = Math.max(maxY, corner.y);
+            });
+          });
+        }
+      } else {
+        // For DOT format, use circular node approximation
+        const nodeRadius = 10; // Approximate node radius
+
+        nodes.forEach(node => {
+          minX = Math.min(minX, node.x - nodeRadius);
+          minY = Math.min(minY, node.y - nodeRadius);
+          maxX = Math.max(maxX, node.x + nodeRadius);
+          maxY = Math.max(maxY, node.y + nodeRadius);
+        });
+      }
+
+      // Add padding
+      const padding = 30;
+      let newMinX = minX - padding;
+      let newMinY = minY - padding;
+      let newMaxX = maxX + padding;
+      let newMaxY = maxY + padding;
+
+      // Make the bounds square by equalizing width and height
+      const width = newMaxX - newMinX;
+      const height = newMaxY - newMinY;
+      const maxDimension = Math.max(width, height);
+
+      // Expand the smaller dimension to match the larger one
+      if (width < maxDimension) {
+        const diff = (maxDimension - width) / 2;
+        newMinX -= diff;
+        newMaxX += diff;
+      }
+      if (height < maxDimension) {
+        const diff = (maxDimension - height) / 2;
+        newMinY -= diff;
+        newMaxY += diff;
+      }
+
+      bounds.push({
+        minX: newMinX,
+        minY: newMinY,
+        maxX: newMaxX,
+        maxY: newMaxY
+      });
+    });
+
+    return bounds;
   }
 
   /**
@@ -204,6 +337,13 @@ export class GraphView extends EventEmitter {
       this._highlightedPath.edges.clear();
       this._highlightedPath.currentColor = '#ff6b6b';
     }
+  }
+
+  /**
+   * Update showComponentBounds flag
+   */
+  updateShowComponentBounds(show) {
+    this._showComponentBounds = show;
   }
 
   // ===== INTERACTION HANDLERS =====

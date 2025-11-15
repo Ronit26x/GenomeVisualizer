@@ -42,6 +42,30 @@ body, html {
 button, input { display: block; margin-bottom: 8px; width: 100%; }
 canvas { display: block; }
 
+/* Toggle Component Bounds button */
+#toggleComponentBounds {
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+#toggleComponentBounds:hover {
+  background: #5a6268;
+}
+
+#toggleComponentBounds.active {
+  background: #28a745;
+  font-weight: bold;
+}
+
+#toggleComponentBounds.active:hover {
+  background: #218838;
+}
+
 /* --- Resolution Section Styles --- */
 .resolution-section {
   margin: 15px 0;

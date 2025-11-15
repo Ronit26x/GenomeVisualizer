@@ -114,6 +114,15 @@ function setupUIHandlers() {
     controller.redraw();
   };
 
+  // Toggle component bounds
+  document.getElementById('toggleComponentBounds').onclick = () => {
+    const enabled = controller.toggleComponentBounds();
+    const button = document.getElementById('toggleComponentBounds');
+    button.textContent = enabled ? 'Hide Component Bounds' : 'Show Component Bounds';
+    button.classList.toggle('active', enabled);
+    logEvent(enabled ? 'Component bounds shown' : 'Component bounds hidden');
+  };
+
   // Remove selected nodes
   document.getElementById('removeNodes').onclick = () => {
     controller.removeSelectedNodes();

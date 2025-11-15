@@ -47,7 +47,9 @@ export class GfaRenderer extends Renderer {
       selection = { nodes: new Set(), edges: new Set() },
       pinnedNodes = new Set(),
       highlightedPath = null,
-      scaleFactor = 1.0
+      scaleFactor = 1.0,
+      componentBounds = [],
+      showComponentBounds = false
     } = renderData;
 
     // Create or update GFA visual nodes
@@ -88,6 +90,14 @@ export class GfaRenderer extends Renderer {
     // Set antialiasing
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = 'high';
+
+    // Draw component bounds first (if enabled)
+    if (showComponentBounds && componentBounds.length > 0) {
+      this.ctx.save();
+      this.ctx.setTransform(transform.k, 0, 0, transform.k, transform.x, transform.y);
+      this.drawComponentBounds(componentBounds, transform);
+      this.ctx.restore();
+    }
 
     // Draw edges first
     this.ctx.globalAlpha = 0.6;
@@ -429,6 +439,95 @@ export class GfaRenderer extends Renderer {
     this.gfaVisualNodes = [];
     this.lastScaleFactor = 1.0;
     this.lastNodeCount = 0;
+  }
+
+  /**
+   * Draw component bounding rectangles
+   */
+  drawComponentBounds(componentBounds, transform) {
+    const ctx = this.ctx;
+
+    // Generate distinct colors for each component
+    const colors = [
+      'rgba(255, 99, 71, 0.25)',   // Tomato - increased opacity
+      'rgba(54, 162, 235, 0.25)',  // Blue
+      'rgba(75, 192, 192, 0.25)',  // Teal
+      'rgba(255, 206, 86, 0.25)',  // Yellow
+      'rgba(153, 102, 255, 0.25)', // Purple
+      'rgba(255, 159, 64, 0.25)',  // Orange
+      'rgba(199, 199, 199, 0.25)', // Gray
+      'rgba(83, 102, 255, 0.25)',  // Indigo
+      'rgba(255, 99, 132, 0.25)',  // Pink
+      'rgba(34, 193, 195, 0.25)'   // Cyan
+    ];
+
+    const borderColors = [
+      'rgba(255, 99, 71, 0.8)',   // Increased opacity
+      'rgba(54, 162, 235, 0.8)',
+      'rgba(75, 192, 192, 0.8)',
+      'rgba(255, 206, 86, 0.8)',
+      'rgba(153, 102, 255, 0.8)',
+      'rgba(255, 159, 64, 0.8)',
+      'rgba(199, 199, 199, 0.8)',
+      'rgba(83, 102, 255, 0.8)',
+      'rgba(255, 99, 132, 0.8)',
+      'rgba(34, 193, 195, 0.8)'
+    ];
+
+    componentBounds.forEach((bounds, index) => {
+      const { minX, minY, maxX, maxY } = bounds;
+      const width = maxX - minX;
+      const height = maxY - minY;
+      const componentSize = Math.sqrt(width * width + height * height);
+
+      // Use modulo to cycle through colors if more components than colors
+      const colorIndex = index % colors.length;
+
+      // Thick solid border - scale-independent for visibility at all zoom levels
+      // Divide by transform.k to make line width constant in screen space
+      const screenBorderWidth = 4 / transform.k; // 4px in screen space always
+
+      // Draw thick solid border (no dashes, no fill)
+      ctx.strokeStyle = borderColors[colorIndex];
+      ctx.lineWidth = screenBorderWidth;
+      ctx.strokeRect(minX, minY, width, height);
+    });
+
+    // Draw labels in screen space (after restoring transform)
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset to screen coordinates
+
+    componentBounds.forEach((bounds, index) => {
+      const { minX, minY } = bounds;
+      const colorIndex = index % colors.length;
+
+      // Transform simulation coordinates to screen coordinates
+      const screenX = minX * transform.k + transform.x;
+      const screenY = minY * transform.k + transform.y;
+
+      // Draw component label with background for better readability
+      ctx.font = 'bold 14px sans-serif';
+      const label = `Component ${index + 1}`;
+      const metrics = ctx.measureText(label);
+      const textWidth = metrics.width;
+      const textHeight = 14;
+
+      // Draw label background
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fillRect(screenX + 5, screenY + 5, textWidth + 10, textHeight + 6);
+
+      // Draw label border
+      ctx.strokeStyle = borderColors[colorIndex];
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      ctx.strokeRect(screenX + 5, screenY + 5, textWidth + 10, textHeight + 6);
+
+      // Draw label text
+      ctx.fillStyle = borderColors[colorIndex];
+      ctx.fillText(label, screenX + 10, screenY + 17);
+    });
+
+    ctx.restore();
   }
 }
 

@@ -51,6 +51,9 @@ export class GraphModel extends EventEmitter {
     // Metadata
     this._nodeMap = new Map(); // id -> node for fast lookup
     this._linkMap = new Map(); // index -> link for fast lookup
+
+    // Visualization options
+    this._showComponentBounds = false;
   }
 
   // ===== GRAPH DATA ACCESSORS =====
@@ -125,6 +128,22 @@ export class GraphModel extends EventEmitter {
 
   get canUndo() {
     return this._history.length >= 2; // Need at least 2 entries to undo
+  }
+
+  // ===== VISUALIZATION OPTIONS =====
+
+  get showComponentBounds() {
+    return this._showComponentBounds;
+  }
+
+  toggleComponentBounds(source = 'user') {
+    this._showComponentBounds = !this._showComponentBounds;
+    this.emit('visualizationOptionChanged', {
+      option: 'showComponentBounds',
+      value: this._showComponentBounds,
+      source
+    });
+    return this._showComponentBounds;
   }
 
   // ===== GRAPH MUTATIONS =====
@@ -543,6 +562,45 @@ export class GraphModel extends EventEmitter {
    */
   _getNextPathColor() {
     return this._pathColors[this._savedPaths.length % this._pathColors.length];
+  }
+
+  /**
+   * Get connected components in the graph
+   * Returns an array of components, where each component is an array of node IDs
+   */
+  getConnectedComponents() {
+    const visited = new Set();
+    const components = [];
+
+    // Helper function to perform DFS
+    const dfs = (nodeId, component) => {
+      if (visited.has(nodeId)) return;
+      visited.add(nodeId);
+      component.push(nodeId);
+
+      // Find all connected nodes
+      this._links.forEach(link => {
+        const sourceId = String(link.source?.id || link.source);
+        const targetId = String(link.target?.id || link.target);
+
+        if (sourceId === String(nodeId) && !visited.has(targetId)) {
+          dfs(targetId, component);
+        } else if (targetId === String(nodeId) && !visited.has(sourceId)) {
+          dfs(sourceId, component);
+        }
+      });
+    };
+
+    // Find all connected components
+    this._nodes.forEach(node => {
+      if (!visited.has(node.id)) {
+        const component = [];
+        dfs(node.id, component);
+        components.push(component);
+      }
+    });
+
+    return components;
   }
 
   /**
