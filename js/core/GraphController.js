@@ -197,6 +197,16 @@ export class GraphController extends EventEmitter {
       isDragging: true
     };
 
+    // Only pin nodes AFTER warm start has completed
+    // Before warm start, let them move freely with the simulation
+    if (!this._firstNodeClickAfterLoad) {
+      const node = this.model.getNode(nodeId);
+      if (node) {
+        node.fx = node.x;
+        node.fy = node.y;
+      }
+    }
+
     // Boost simulation during drag
     this.layoutManager.boostSimulation(0.3);
 
@@ -208,13 +218,33 @@ export class GraphController extends EventEmitter {
       return;
     }
 
-    // Update model with new position
+    // Update model position
     this.model.updateNodePosition(nodeId, x, y, 'drag');
+
+    // Only update fixed position AFTER warm start
+    if (!this._firstNodeClickAfterLoad) {
+      const node = this.model.getNode(nodeId);
+      if (node) {
+        node.fx = x;
+        node.fy = y;
+      }
+    }
   }
 
   _onNodeDragEnd(nodeId) {
     if (!this._dragState) {
       return;
+    }
+
+    // Only keep nodes pinned AFTER warm start has completed
+    // Before warm start, let simulation continue to move them
+    if (!this._firstNodeClickAfterLoad) {
+      const node = this.model.getNode(nodeId);
+      if (node) {
+        // Keep fx/fy set to maintain the dragged position
+        node.fx = node.x;
+        node.fy = node.y;
+      }
     }
 
     // Cool down simulation after drag
