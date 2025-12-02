@@ -178,6 +178,10 @@ export class GraphController extends EventEmitter {
           // Done with warm start - restart with faster decay to settle quickly
           sim.alpha(0.3).alphaDecay(0.1).restart();
           console.log('[GraphController] Warm start complete');
+
+          // Apply rotational alignment to GFA nodes for cleaner layout
+          console.log('[GraphController] Applying rotational alignment for cleaner layout');
+          this.layoutManager.applyRotationalAlignment();
         }
       };
 
@@ -275,6 +279,9 @@ export class GraphController extends EventEmitter {
 
     // Reset first click flag on new graph load
     this._firstNodeClickAfterLoad = true;
+
+    // Disable alignment forces (will be re-enabled after warm start)
+    this.layoutManager.disableAlignmentForces();
 
     // Start layout simulation
     const center = this.view.getCanvasCenter();

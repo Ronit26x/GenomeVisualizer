@@ -77,10 +77,16 @@ export class GfaRenderer extends Renderer {
       if (modelNode) {
         gfaNode.x = modelNode.x;
         gfaNode.y = modelNode.y;
-        gfaNode.updatePosition(); // Update segments and subnodes
 
-        // Apply dynamic rotation (skipped for merged nodes)
-        gfaNode.applyDynamicRotation(nodes, edges, 0.05);
+        // Use calculated angle if available (from rotational alignment after warm start)
+        if (modelNode.calculatedAngle !== undefined) {
+          gfaNode.angle = modelNode.calculatedAngle;
+        } else {
+          // Apply dynamic rotation (skipped for merged nodes)
+          gfaNode.applyDynamicRotation(nodes, edges, 0.05);
+        }
+
+        gfaNode.updatePosition(); // Update segments and subnodes
       }
     });
 

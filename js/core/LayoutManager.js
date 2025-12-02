@@ -286,6 +286,233 @@ export class LayoutManager extends EventEmitter {
     }
   }
 
+  // ===== ALIGNMENT FORCES =====
+
+  /**
+   * Apply optimal rotation alignment to GFA nodes after warm start
+   * This rotates nodes to align with their edge flow directions
+   */
+  applyRotationalAlignment() {
+    if (!this.simulation) return;
+
+    console.log('[LayoutManager] Applying rotational alignment to GFA nodes');
+
+    const nodes = this.simulation.nodes();
+    const links = this.model._links;
+    const format = this.model._format;
+
+    // Only apply to GFA format
+    if (format !== 'gfa') {
+      console.log('[LayoutManager] Skipping rotational alignment - not GFA format');
+      return;
+    }
+
+    let alignedCount = 0;
+
+    nodes.forEach(node => {
+      // Find all edges connected to this node
+      const connectedEdges = links.filter(link => {
+        const sourceId = link.source?.id || link.source;
+        const targetId = link.target?.id || link.target;
+        return sourceId === node.id || targetId === node.id;
+      });
+
+      if (connectedEdges.length < 2) return; // Need at least 2 edges to determine orientation
+
+      // Calculate angles to all connected nodes
+      const angles = [];
+
+      connectedEdges.forEach(link => {
+        const sourceId = link.source?.id || link.source;
+        const targetId = link.target?.id || link.target;
+
+        // Find the other node
+        let otherNode;
+        if (sourceId === node.id) {
+          otherNode = nodes.find(n => n.id === targetId);
+        } else {
+          otherNode = nodes.find(n => n.id === sourceId);
+        }
+
+        if (otherNode) {
+          const dx = otherNode.x - node.x;
+          const dy = otherNode.y - node.y;
+          const angle = Math.atan2(dy, dx);
+          angles.push(angle);
+        }
+      });
+
+      if (angles.length < 2) return;
+
+      // Separate edges by direction (incoming vs outgoing) based on GFA semantics
+      const incomingAngles = [];
+      const outgoingAngles = [];
+
+      connectedEdges.forEach(link => {
+        const sourceId = link.source?.id || link.source;
+        const targetId = link.target?.id || link.target;
+        const srcOri = link.srcOrientation || '+';
+        const tgtOri = link.tgtOrientation || '+';
+
+        let otherNode;
+        let isIncoming = false;
+
+        if (sourceId === node.id) {
+          // This node is source
+          otherNode = nodes.find(n => n.id === targetId);
+          // If source orientation is +, edge goes out from outgoing end
+          // If source orientation is -, edge goes out from incoming end
+          isIncoming = (srcOri === '-');
+        } else {
+          // This node is target
+          otherNode = nodes.find(n => n.id === sourceId);
+          // If target orientation is +, edge comes in to incoming end
+          // If target orientation is -, edge comes in to outgoing end
+          isIncoming = (tgtOri === '+');
+        }
+
+        if (otherNode) {
+          const dx = otherNode.x - node.x;
+          const dy = otherNode.y - node.y;
+          const angle = Math.atan2(dy, dx);
+
+          if (isIncoming) {
+            incomingAngles.push(angle);
+          } else {
+            outgoingAngles.push(angle);
+          }
+        }
+      });
+
+      // Calculate optimal orientation respecting flow direction
+      const optimalAngle = this._calculateOptimalNodeOrientation(angles, incomingAngles, outgoingAngles);
+
+      // Store the calculated angle on the node for the renderer to use
+      node.calculatedAngle = optimalAngle;
+      alignedCount++;
+    });
+
+    console.log(`[LayoutManager] Aligned ${alignedCount} nodes`);
+  }
+
+  /**
+   * Calculate optimal orientation angle for a node based on its edge angles
+   * Respects GFA flow direction (incoming edges to back, outgoing to front)
+   */
+  _calculateOptimalNodeOrientation(angles, incomingAngles, outgoingAngles) {
+    if (angles.length === 0) return 0;
+    if (angles.length === 1) return angles[0];
+
+    // If we have clear incoming/outgoing separation, use flow direction
+    if (incomingAngles.length > 0 && outgoingAngles.length > 0) {
+      // Calculate average direction of outgoing edges
+      let sumX = 0, sumY = 0;
+      outgoingAngles.forEach(angle => {
+        sumX += Math.cos(angle);
+        sumY += Math.sin(angle);
+      });
+
+      // Node should point toward outgoing edges (arrow points out)
+      const outgoingDirection = Math.atan2(sumY, sumX);
+
+      // Test this direction and its opposite, pick the one that aligns better
+      const candidate1 = outgoingDirection;
+      const candidate2 = outgoingDirection + Math.PI;
+
+      const score1 = this._scoreOrientationDirected(candidate1, incomingAngles, outgoingAngles);
+      const score2 = this._scoreOrientationDirected(candidate2, incomingAngles, outgoingAngles);
+
+      return score1 <= score2 ? candidate1 : candidate2;
+    }
+
+    // Fallback: No clear flow direction, just minimize criss-crossing
+    let bestAngle = 0;
+    let bestScore = Infinity;
+
+    const numCandidates = 18;
+    for (let i = 0; i < numCandidates; i++) {
+      const candidateAngle = (i * Math.PI) / numCandidates;
+      const score = this._scoreOrientation(candidateAngle, angles);
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestAngle = candidateAngle;
+      }
+    }
+
+    return bestAngle;
+  }
+
+  /**
+   * Score orientation considering flow direction
+   * Incoming edges should connect to back (180°), outgoing to front (0°)
+   */
+  _scoreOrientationDirected(nodeAngle, incomingAngles, outgoingAngles) {
+    let totalDeviation = 0;
+
+    // Incoming edges should connect to the back (-180° relative to node)
+    incomingAngles.forEach(edgeAngle => {
+      let relativeAngle = edgeAngle - nodeAngle;
+      while (relativeAngle > Math.PI) relativeAngle -= 2 * Math.PI;
+      while (relativeAngle < -Math.PI) relativeAngle += 2 * Math.PI;
+
+      // Ideal is 180° (back of node)
+      const distToBack = Math.abs(Math.abs(relativeAngle) - Math.PI);
+      totalDeviation += distToBack * distToBack;
+    });
+
+    // Outgoing edges should connect to the front (0° relative to node)
+    outgoingAngles.forEach(edgeAngle => {
+      let relativeAngle = edgeAngle - nodeAngle;
+      while (relativeAngle > Math.PI) relativeAngle -= 2 * Math.PI;
+      while (relativeAngle < -Math.PI) relativeAngle += 2 * Math.PI;
+
+      // Ideal is 0° (front of node)
+      const distToFront = Math.abs(relativeAngle);
+      totalDeviation += distToFront * distToFront;
+    });
+
+    return totalDeviation;
+  }
+
+  /**
+   * Score how well a node orientation aligns with its edge angles
+   * Lower score = better alignment (edges connect at opposite ends, not sides)
+   */
+  _scoreOrientation(nodeAngle, edgeAngles) {
+    // For a node oriented at 'nodeAngle', edges should ideally connect at 0° or 180°
+    // Calculate how much each edge deviates from these ideal connection points
+
+    let totalDeviation = 0;
+
+    edgeAngles.forEach(edgeAngle => {
+      // Calculate relative angle of edge to node orientation
+      let relativeAngle = edgeAngle - nodeAngle;
+
+      // Normalize to [-π, π]
+      while (relativeAngle > Math.PI) relativeAngle -= 2 * Math.PI;
+      while (relativeAngle < -Math.PI) relativeAngle += 2 * Math.PI;
+
+      // Ideal connection points are at 0° (front) or 180° (back)
+      // Calculate distance to nearest ideal point
+      const distToFront = Math.abs(relativeAngle);
+      const distToBack = Math.abs(Math.abs(relativeAngle) - Math.PI);
+      const minDist = Math.min(distToFront, distToBack);
+
+      // Accumulate squared deviation (penalize perpendicular connections heavily)
+      totalDeviation += minDist * minDist;
+    });
+
+    return totalDeviation;
+  }
+
+  /**
+   * Disable alignment forces (kept for compatibility)
+   */
+  disableAlignmentForces() {
+    // No-op now, kept for compatibility
+  }
+
   // ===== CONFIGURATION =====
 
   /**
