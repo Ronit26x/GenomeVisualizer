@@ -121,8 +121,43 @@ export class GfaRenderer extends Renderer {
       const isHighlighted = highlightedPath && highlightedPath.nodes &&
                            highlightedPath.nodes.has(String(gfaNode.id));
 
+      // Draw node body
       gfaNode.draw(this.ctx, transform, isSelected, isPinned, isHighlighted);
+
+      // Draw visual subvertices for longer nodes (threshold: 100px drawn length)
+      if (gfaNode.drawnLength > 100) {
+        this.drawSubvertices(gfaNode, transform);
+      }
     });
+  }
+
+  /**
+   * Draw small visual subvertices along the node body
+   * These are just visual markers (no physics) to show internal structure
+   */
+  drawSubvertices(gfaNode, transform) {
+    const numSubvertices = 5; // Number of internal markers
+    const ctx = this.ctx;
+
+    // Calculate positions along the node's drawn length
+    for (let i = 1; i <= numSubvertices; i++) {
+      const ratio = i / (numSubvertices + 1); // Evenly spaced: 0.16, 0.33, 0.5, 0.66, 0.83
+
+      // Calculate position along node body
+      const offset = (ratio - 0.5) * gfaNode.drawnLength;
+      const x = gfaNode.x + Math.cos(gfaNode.angle) * offset;
+      const y = gfaNode.y + Math.sin(gfaNode.angle) * offset;
+
+      // Transform to screen coordinates
+      const screenX = x * transform.k + transform.x;
+      const screenY = y * transform.k + transform.y;
+
+      // Draw small blue dot (distinct from red/green subnodes)
+      ctx.fillStyle = 'rgba(100, 149, 237, 0.6)'; // Cornflower blue, semi-transparent
+      ctx.beginPath();
+      ctx.arc(screenX, screenY, 3 * transform.k, 0, 2 * Math.PI);
+      ctx.fill();
+    }
   }
 
   /**
