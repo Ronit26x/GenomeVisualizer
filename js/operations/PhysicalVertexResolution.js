@@ -265,7 +265,8 @@ export class PhysicalVertexResolution extends Operation {
       }
 
       // Check if this node needs to be split into a chain (GFA only with long nodes)
-      const chainData = this.graph.createChainSegmentsIfNeeded(newNode, 50000, 5);
+      // Use a low threshold (1kb) to force chain splitting for resolved nodes so they render as curves
+      const chainData = this.graph.createChainSegmentsIfNeeded(newNode, 1000, 5);
 
       if (chainData.needsSplit) {
         // Node was split - add all segments and internal links

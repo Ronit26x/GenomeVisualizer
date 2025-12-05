@@ -625,7 +625,7 @@ export class GfaRenderer extends Renderer {
   clearCache() {
     this.gfaVisualNodes = [];
     this.lastScaleFactor = 1.0;
-    this.lastNodeCount = 0;
+    this.lastNodeCount = -1; // Set to -1 to force recreation on next render
   }
 
   /**

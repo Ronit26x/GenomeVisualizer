@@ -22,6 +22,9 @@ export class GraphController extends EventEmitter {
     // Track first node click for one-time warm start
     this._firstNodeClickAfterLoad = true;
 
+    // Auto-stop simulation timer
+    this._autoStopTimer = null;
+
     this._setupViewListeners();
     this._setupModelListeners();
   }
@@ -153,6 +156,12 @@ export class GraphController extends EventEmitter {
       this.model.selectNodes(nodeId, { additive: false });
     }
 
+    // Wake simulation on node click (after warm start is done)
+    if (!this._firstNodeClickAfterLoad) {
+      this._wakeSimulation();
+      this._scheduleAutoStop(2000);
+    }
+
     // One-time warm start on first node click
     if (this._firstNodeClickAfterLoad && this.layoutManager.simulation) {
       console.log('[GraphController] First click - starting warm start (4000 ticks)');
@@ -196,6 +205,10 @@ export class GraphController extends EventEmitter {
               this.view.canvas.height
             );
           }
+
+          // Auto-stop simulation 4 seconds after warm start
+          console.log('[GraphController] Scheduling auto-stop in 4 seconds');
+          this._scheduleAutoStop(4000);
         }
       };
 
@@ -225,8 +238,8 @@ export class GraphController extends EventEmitter {
       }
     }
 
-    // Boost simulation during drag
-    this.layoutManager.boostSimulation(0.3);
+    // Wake up simulation on interaction
+    this._wakeSimulation();
 
     this.emit('nodeDragStarted', { nodeId });
   }
@@ -246,6 +259,11 @@ export class GraphController extends EventEmitter {
         node.fx = x;
         node.fy = y;
       }
+
+      // Keep simulation awake during drag
+      if (this.layoutManager.simulation && this.layoutManager.simulation.alpha() < 0.1) {
+        this.layoutManager.simulation.alphaTarget(0.3);
+      }
     }
   }
 
@@ -263,10 +281,15 @@ export class GraphController extends EventEmitter {
         node.fx = node.x;
         node.fy = node.y;
       }
+
+      // Clear alpha target to let simulation cool down
+      if (this.layoutManager.simulation) {
+        this.layoutManager.simulation.alphaTarget(0);
+      }
     }
 
-    // Cool down simulation after drag
-    this.layoutManager.coolSimulation();
+    // Schedule auto-stop 2 seconds after interaction ends
+    this._scheduleAutoStop(2000);
 
     this._dragState = null;
 
@@ -281,6 +304,51 @@ export class GraphController extends EventEmitter {
   _onCanvasZoom() {
     // View already updated, just trigger render
     // Could add zoom-level specific logic here
+  }
+
+  // ===== SIMULATION LIFECYCLE MANAGEMENT =====
+
+  /**
+   * Wake up simulation on user interaction
+   */
+  _wakeSimulation() {
+    // Clear any pending auto-stop
+    if (this._autoStopTimer) {
+      clearTimeout(this._autoStopTimer);
+      this._autoStopTimer = null;
+    }
+
+    // Restart simulation if it's stopped
+    if (this.layoutManager.simulation) {
+      const currentAlpha = this.layoutManager.simulation.alpha();
+      if (currentAlpha < 0.01) {
+        console.log('[GraphController] Waking simulation due to user interaction');
+        this.layoutManager.simulation.alpha(0.3).restart();
+      } else {
+        // Just boost if already running
+        this.layoutManager.boostSimulation(0.3);
+      }
+    }
+  }
+
+  /**
+   * Schedule simulation to auto-stop after delay
+   */
+  _scheduleAutoStop(delay) {
+    // Clear any existing timer
+    if (this._autoStopTimer) {
+      clearTimeout(this._autoStopTimer);
+    }
+
+    // Schedule new auto-stop
+    this._autoStopTimer = setTimeout(() => {
+      if (this.layoutManager.simulation) {
+        console.log(`[GraphController] Auto-stopping simulation after ${delay}ms idle`);
+        this.layoutManager.simulation.stop();
+        this.layoutManager.isRunning = false;
+      }
+      this._autoStopTimer = null;
+    }, delay);
   }
 
   // ===== PUBLIC API (called by UI/main.js) =====
@@ -463,6 +531,12 @@ export class GraphController extends EventEmitter {
    * Clean up all listeners and references
    */
   destroy() {
+    // Clear auto-stop timer
+    if (this._autoStopTimer) {
+      clearTimeout(this._autoStopTimer);
+      this._autoStopTimer = null;
+    }
+
     this.layoutManager.destroy();
     this.view.destroy();
     this.model.removeAllListeners();
