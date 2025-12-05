@@ -54,6 +54,10 @@ export class GraphModel extends EventEmitter {
 
     // Visualization options
     this._showComponentBounds = false;
+
+    // Node chains for natural curving
+    this._nodeChains = new Map(); // chainId -> {originalNode, segments[], segmentIds[]}
+    this._chainsEnabled = false;
   }
 
   // ===== GRAPH DATA ACCESSORS =====
@@ -493,6 +497,125 @@ export class GraphModel extends EventEmitter {
 
     this.emit('pathsCleared', { source });
     this.emit('stateChanged', { type: 'pathsCleared', data: {}, source });
+  }
+
+  // ===== NODE CHAINS FOR NATURAL CURVING =====
+
+  /**
+   * Split ALL nodes into chains of smaller connected segments
+   * This allows all nodes to bend naturally in the physics simulation
+   */
+  splitLongNodesIntoChains(lengthThreshold = 50000, numSegments = 5, source = 'system') {
+    if (this._format !== 'gfa') {
+      console.log('[GraphModel] Chain splitting only supported for GFA format');
+      return;
+    }
+
+    console.log('[GraphModel] Splitting ALL nodes into chains...');
+    // Split ALL nodes, not just long ones
+    const nodesToSplit = this._nodes.filter(node => !node.isChainSegment);
+
+    if (nodesToSplit.length === 0) {
+      console.log('[GraphModel] No nodes to split');
+      return;
+    }
+
+    const newNodes = [];
+    const newLinks = [];
+    const nodesToRemove = [];
+
+    nodesToSplit.forEach(originalNode => {
+      // Scale segment count based on node length: 3 for smallest, 5 for longest
+      const nodeLength = originalNode.length || 1000;
+      const maxLength = Math.max(...nodesToSplit.map(n => n.length || 1000));
+      const normalizedLength = nodeLength / maxLength;
+      const scaledSegments = Math.round(3 + (5 - 3) * normalizedLength);
+      const actualSegments = Math.max(3, Math.min(5, scaledSegments));
+
+      console.log(`[GraphModel] Splitting node ${originalNode.id} (length: ${originalNode.length}bp) into ${actualSegments} segments`);
+
+      // Create chain segments
+      const segments = [];
+      for (let i = 0; i < actualSegments; i++) {
+        const segment = {
+          id: `${originalNode.id}_seg${i}`,
+          parentChainId: originalNode.id,
+          segmentIndex: i,
+          isChainSegment: true,
+          isFirstSegment: i === 0,
+          isLastSegment: i === actualSegments - 1,
+          // Copy properties from original
+          length: originalNode.length / actualSegments,
+          depth: originalNode.depth,
+          seq: originalNode.seq,
+          gfaType: originalNode.gfaType,
+          x: originalNode.x, // Start at same position
+          y: originalNode.y,
+          vx: 0,
+          vy: 0
+        };
+        segments.push(segment);
+        newNodes.push(segment);
+      }
+
+      // Create internal chain links (connect consecutive segments)
+      for (let i = 0; i < segments.length - 1; i++) {
+        newLinks.push({
+          source: segments[i].id,
+          target: segments[i + 1].id,
+          isInternalChainLink: true,
+          parentChainId: originalNode.id,
+          gfaType: 'internal_chain'
+        });
+      }
+
+      // Store chain metadata
+      this._nodeChains.set(originalNode.id, {
+        originalNode: { ...originalNode },
+        segments: segments,
+        segmentIds: segments.map(s => s.id)
+      });
+
+      // Mark original node for removal
+      nodesToRemove.push(originalNode.id);
+
+      // Redirect external edges to chain endpoints
+      this._links.forEach(link => {
+        const sourceId = String(link.source?.id || link.source);
+        const targetId = String(link.target?.id || link.target);
+
+        // If edge connects to this node, redirect to appropriate segment
+        if (sourceId === originalNode.id) {
+          // Outgoing edge → connect from last segment
+          link.source = segments[segments.length - 1].id;
+          console.log(`  Redirected outgoing edge: ${originalNode.id} → ${link.source}`);
+        }
+        if (targetId === originalNode.id) {
+          // Incoming edge → connect to first segment
+          link.target = segments[0].id;
+          console.log(`  Redirected incoming edge: ${originalNode.id} → ${link.target}`);
+        }
+      });
+    });
+
+    // Remove original nodes and add new segments
+    this._nodes = this._nodes.filter(node => !nodesToRemove.includes(node.id));
+    this._nodes.push(...newNodes);
+    this._links.push(...newLinks);
+
+    // Rebuild maps
+    this._rebuildMaps();
+
+    this._chainsEnabled = true;
+
+    console.log(`[GraphModel] Chain splitting complete: ${nodesToSplit.length} nodes split into ${newNodes.length} segments`);
+    console.log(`[GraphModel] Total nodes: ${this._nodes.length}, Total links: ${this._links.length}`);
+
+    this.emit('chainsSplit', {
+      chainCount: nodesToSplit.length,
+      segmentCount: newNodes.length,
+      source
+    });
   }
 
   // ===== HISTORY (UNDO/REDO) =====

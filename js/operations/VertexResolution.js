@@ -27,9 +27,10 @@ export class VertexResolution extends Operation {
    * Validate if operation can be executed
    */
   validate() {
-    const vertex = this.graph.getNode(this.vertexId);
+    // Use getNodeOrChainOriginal to support both regular nodes and chains
+    const vertex = this.graph.getNodeOrChainOriginal(this.vertexId);
     if (!vertex) {
-      throw new Error(`Vertex ${this.vertexId} not found`);
+      throw new Error(`Vertex ${this.vertexId} not found (neither as node nor chain)`);
     }
 
     if (!this.selectedCombinations || this.selectedCombinations.length === 0) {
@@ -51,8 +52,9 @@ export class VertexResolution extends Operation {
       edges: this.graph.getEdges().map(e => this.cloneObject(e))
     });
 
-    // Get vertex
-    this.vertex = this.graph.getNode(this.vertexId);
+    // Get vertex (works for both regular nodes and chains)
+    this.vertex = this.graph.getNodeOrChainOriginal(this.vertexId);
+    console.log(`[VertexResolution] Retrieved vertex/chain:`, this.vertex);
 
     // Get connections
     this.connections = this.getVertexConnections(this.vertexId);
@@ -63,17 +65,32 @@ export class VertexResolution extends Operation {
     this.newNodes = this.createNewNodes();
 
     // MATCH LEGACY: Directly manipulate model's internal arrays to preserve D3 references
-    // Remove original vertex
     const model = this.graph.getModel();
-    model._nodes = model._nodes.filter(n => n.id !== this.vertexId);
 
-    // Remove edges connected to original vertex
+    // Check if this is a chain - if so, remove all segments instead of the original vertex
+    const chainInfo = this.graph.getChainInfo(this.vertexId);
+    let nodesToRemove = [];
+
+    if (chainInfo) {
+      // This is a chain - remove all segments
+      nodesToRemove = chainInfo.segmentIds;
+      console.log(`[VertexResolution] Removing chain segments:`, nodesToRemove);
+    } else {
+      // Regular node - remove just this node
+      nodesToRemove = [this.vertexId];
+      console.log(`[VertexResolution] Removing regular node:`, this.vertexId);
+    }
+
+    // Remove nodes (either chain segments or regular node)
+    const nodesToRemoveSet = new Set(nodesToRemove.map(String));
+    model._nodes = model._nodes.filter(n => !nodesToRemoveSet.has(String(n.id)));
+
+    // Remove edges connected to removed nodes
     // CRITICAL: Use String() to ensure type-safe comparison (IDs might be numbers or strings)
-    const vertexIdStr = String(this.vertexId);
     model._links = model._links.filter(link => {
       const sourceId = String((typeof link.source === 'object') ? link.source.id : link.source);
       const targetId = String((typeof link.target === 'object') ? link.target.id : link.target);
-      return sourceId !== vertexIdStr && targetId !== vertexIdStr;
+      return !nodesToRemoveSet.has(sourceId) && !nodesToRemoveSet.has(targetId);
     });
 
     // Add new nodes (don't clone - D3 needs to mutate these directly)
@@ -93,7 +110,7 @@ export class VertexResolution extends Operation {
     model.emit('graphStructureChanged', {
       reason: 'vertexResolution',
       nodesAdded: this.newNodes.length,
-      nodesRemoved: 1,
+      nodesRemoved: nodesToRemove.length,  // Use actual count (1 for regular node, multiple for chain)
       edgesAdded: this.newLinks.length,
       edgesRemoved: this.connections.incoming.length + this.connections.outgoing.length
     });
@@ -181,10 +198,12 @@ export class VertexResolution extends Operation {
 
   /**
    * Create new nodes from selected combinations
-   * EXACT COPY from main.js performVertexResolution()
+   * Chain-aware: creates chain segments for long nodes during resolution
    */
   createNewNodes() {
-    const newNodes = [];
+    const allSegments = [];
+    const allInternalLinks = [];
+    const nodeMapping = new Map(); // Maps logical node ID to first/last segment IDs
     const selectedCombos = this.selectedCombinations;
     const vertex = this.vertex;
 
@@ -213,15 +232,40 @@ export class VertexResolution extends Operation {
         newNode.y = vertex.y + radius * Math.sin(angleOffset);
       }
 
-      newNodes.push(newNode);
+      // Check if this node needs to be split into a chain (GFA only with long nodes)
+      const chainData = this.graph.createChainSegmentsIfNeeded(newNode, 50000, 5);
+
+      if (chainData.needsSplit) {
+        // Node was split - add all segments and internal links
+        console.log(`[VertexResolution] Node ${newNodeId} split into ${chainData.segments.length} segments`);
+        allSegments.push(...chainData.segments);
+        allInternalLinks.push(...chainData.internalLinks);
+
+        // Store mapping for link creation (connect to first/last segments)
+        nodeMapping.set(newNodeId, {
+          firstSegmentId: chainData.segments[0].id,
+          lastSegmentId: chainData.segments[chainData.segments.length - 1].id
+        });
+      } else {
+        // Regular node - just add it
+        allSegments.push(newNode);
+        nodeMapping.set(newNodeId, {
+          firstSegmentId: newNodeId,
+          lastSegmentId: newNodeId
+        });
+      }
     });
 
-    return newNodes;
+    // Store for use in createNewLinks()
+    this.nodeMapping = nodeMapping;
+    this.internalChainLinks = allInternalLinks;
+
+    return allSegments;
   }
 
   /**
    * Create new links from selected combinations
-   * EXACT COPY from main.js performVertexResolution()
+   * Chain-aware: connects to first/last segments for chains
    */
   createNewLinks() {
     const newLinks = [];
@@ -230,23 +274,48 @@ export class VertexResolution extends Operation {
 
     selectedCombos.forEach((combo, index) => {
       const newNodeId = selectedCombos.length === 1 ? vertex.id : `${vertex.id}_${index + 1}`;
+      const mapping = this.nodeMapping.get(newNodeId);
 
+      if (!mapping) {
+        console.error(`[VertexResolution] No mapping found for node ${newNodeId}`);
+        return;
+      }
+
+      // Validate external node references
+      if (combo.incoming) {
+        const externalNode = this.graph.getNode(combo.incoming.sourceId);
+        if (!externalNode) {
+          console.warn(`[VertexResolution] WARNING: External incoming node ${combo.incoming.sourceId} not found!`);
+        }
+      }
+      if (combo.outgoing) {
+        const externalNode = this.graph.getNode(combo.outgoing.targetId);
+        if (!externalNode) {
+          console.warn(`[VertexResolution] WARNING: External outgoing node ${combo.outgoing.targetId} not found!`);
+        }
+      }
+
+      // Incoming edges connect to the FIRST segment
       if (combo.incoming) {
         newLinks.push({
           ...combo.incoming.link,
-          target: newNodeId,
+          target: mapping.firstSegmentId,
           source: combo.incoming.sourceId
         });
       }
 
+      // Outgoing edges connect from the LAST segment
       if (combo.outgoing) {
         newLinks.push({
           ...combo.outgoing.link,
-          source: newNodeId,
+          source: mapping.lastSegmentId,
           target: combo.outgoing.targetId
         });
       }
     });
+
+    // Add internal chain links
+    newLinks.push(...this.internalChainLinks);
 
     return newLinks;
   }

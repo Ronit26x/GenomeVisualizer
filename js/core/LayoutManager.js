@@ -136,10 +136,24 @@ export class LayoutManager extends EventEmitter {
 
     // Create D3 force simulation (matching existing behavior)
     this.simulation = d3.forceSimulation(nodes)
-      .force('charge', d3.forceManyBody().strength(-300))
+      .force('charge', d3.forceManyBody().strength(d => {
+        // Reduce charge for chain segments to prevent excessive repulsion
+        return d.isChainSegment ? -100 : -300;
+      }))
       .force('link', d3.forceLink(links)
         .id(d => d.id)
-        .distance(100))
+        .distance(link => {
+          // Internal chain links: very short distance (tight chains)
+          if (link.isInternalChainLink) return 20;
+          // External links: normal distance
+          return 100;
+        })
+        .strength(link => {
+          // Internal chain links: very strong (keep chain together)
+          if (link.isInternalChainLink) return 2.0;
+          // External links: normal strength
+          return 1.0;
+        }))
       .force('center', d3.forceCenter(canvasWidth / 2, canvasHeight / 2))
       .on('tick', () => this._onTick())
       .on('end', () => this._onEnd());
@@ -196,10 +210,24 @@ export class LayoutManager extends EventEmitter {
 
     // Completely recreate simulation (matching old implementation's startSimulation())
     this.simulation = d3.forceSimulation(nodes)
-      .force('charge', d3.forceManyBody().strength(-300))
+      .force('charge', d3.forceManyBody().strength(d => {
+        // Reduce charge for chain segments to prevent excessive repulsion
+        return d.isChainSegment ? -100 : -300;
+      }))
       .force('link', d3.forceLink(links)
         .id(d => d.id)
-        .distance(100))
+        .distance(link => {
+          // Internal chain links: very short distance (tight chains)
+          if (link.isInternalChainLink) return 20;
+          // External links: normal distance
+          return 100;
+        })
+        .strength(link => {
+          // Internal chain links: very strong (keep chain together)
+          if (link.isInternalChainLink) return 2.0;
+          // External links: normal strength
+          return 1.0;
+        }))
       .force('center', d3.forceCenter(centerX, centerY))
       .on('tick', () => this._onTick())
       .on('end', () => this._onEnd());

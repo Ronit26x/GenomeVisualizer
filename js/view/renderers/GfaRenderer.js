@@ -105,60 +105,181 @@ export class GfaRenderer extends Renderer {
       this.ctx.restore();
     }
 
-    // Draw edges first
+    // Draw edges first (skip internal chain links)
     this.ctx.globalAlpha = 0.6;
     edges.forEach((edge, index) => {
+      // Skip internal chain links - they're not visible
+      if (edge.isInternalChainLink) return;
+
       const isHighlighted = highlightedPath && highlightedPath.edges &&
                            highlightedPath.edges.has(index);
-      this.drawGfaEdge(edge, index, transform, isHighlighted, highlightedPath);
+      this.drawGfaEdge(edge, index, transform, isHighlighted, highlightedPath, nodes);
     });
     this.ctx.globalAlpha = 1.0;
 
+    // Group chain segments and render as single curved nodes
+    const renderedChains = new Set();
+    const chainSegmentsByChainId = this._groupChainSegments(nodes);
+
+    // Calculate max drawn length for subvertex scaling
+    let maxDrawnLength = 0;
+    this.gfaVisualNodes.forEach(gfaNode => {
+      const sourceNode = nodes.find(n => n.id === gfaNode.id);
+      if (!sourceNode?.isChainSegment) {
+        maxDrawnLength = Math.max(maxDrawnLength, gfaNode.drawnLength);
+      }
+    });
+
     // Draw nodes on top
     this.gfaVisualNodes.forEach(gfaNode => {
+      // Skip individual chain segments - render entire chain instead
+      const sourceNode = nodes.find(n => n.id === gfaNode.id);
+      if (sourceNode && sourceNode.isChainSegment) {
+        const chainId = sourceNode.parentChainId;
+
+        // Render the whole chain once (when we encounter first segment)
+        if (!renderedChains.has(chainId)) {
+          renderedChains.add(chainId);
+          const chainSegments = chainSegmentsByChainId.get(chainId) || [];
+          if (chainSegments.length > 0) {
+            this.drawChainAsCurvedNode(chainSegments, transform, selection, pinnedNodes, highlightedPath);
+          }
+        }
+        return; // Skip individual segment rendering
+      }
+
+      // Regular node rendering (not part of a chain)
       const isSelected = selection.nodes && selection.nodes.has(gfaNode.id);
       const isPinned = pinnedNodes.has(gfaNode.id);
       const isHighlighted = highlightedPath && highlightedPath.nodes &&
                            highlightedPath.nodes.has(String(gfaNode.id));
 
-      // Draw node body
+      // Draw node body (now with articulated segments)
       gfaNode.draw(this.ctx, transform, isSelected, isPinned, isHighlighted);
-
-      // Draw visual subvertices for longer nodes (threshold: 100px drawn length)
-      if (gfaNode.drawnLength > 100) {
-        this.drawSubvertices(gfaNode, transform);
-      }
     });
   }
 
   /**
-   * Draw small visual subvertices along the node body
-   * These are just visual markers (no physics) to show internal structure
+   * Group chain segments by their parent chain ID
    */
-  drawSubvertices(gfaNode, transform) {
-    const numSubvertices = 5; // Number of internal markers
+  _groupChainSegments(nodes) {
+    const chains = new Map();
+    nodes.forEach(node => {
+      if (node.isChainSegment && node.parentChainId) {
+        if (!chains.has(node.parentChainId)) {
+          chains.set(node.parentChainId, []);
+        }
+        chains.get(node.parentChainId).push(node);
+      }
+    });
+
+    // Sort segments within each chain by segmentIndex
+    chains.forEach((segments, chainId) => {
+      segments.sort((a, b) => a.segmentIndex - b.segmentIndex);
+    });
+
+    return chains;
+  }
+
+  /**
+   * Get sorted chain segments for a specific chain ID
+   */
+  _getChainSegments(chainId, nodes) {
+    if (!nodes) return [];
+
+    const segments = nodes.filter(node =>
+      node.isChainSegment && node.parentChainId === chainId
+    );
+
+    // Sort by segment index
+    segments.sort((a, b) => a.segmentIndex - b.segmentIndex);
+
+    return segments;
+  }
+
+  /**
+   * Draw a chain of segments as a single curved node
+   */
+  drawChainAsCurvedNode(chainSegments, transform, selection, pinnedNodes, highlightedPath) {
+    if (chainSegments.length === 0) return;
+
+    const ctx = this.ctx;
+    const firstSegment = chainSegments[0];
+    const lastSegment = chainSegments[chainSegments.length - 1];
+
+    // Determine selection/highlight status (based on any segment)
+    const isSelected = chainSegments.some(seg => selection.nodes && selection.nodes.has(seg.id));
+    const isPinned = chainSegments.some(seg => pinnedNodes.has(seg.id));
+    const isHighlighted = chainSegments.some(seg =>
+      highlightedPath && highlightedPath.nodes && highlightedPath.nodes.has(String(seg.id))
+    );
+
+    // Colors - use parent chain ID for consistent color across all segments
+    const chainId = firstSegment.parentChainId;
+    const color = this._getNodeColor({ id: chainId });
+    const bodyColor = isHighlighted ? '#FF0000' : color;
+    const borderColor = isSelected ? '#FF0000' : (isPinned ? '#FF8800' : '#000000');
+    const borderWidth = Math.max(0.5, (isSelected ? 2 : 0.5) * transform.k);
+
+    // Build curved path through chain segment positions
+    const curvePoints = chainSegments.map(seg => ({
+      x: seg.x * transform.k + transform.x,
+      y: seg.y * transform.k + transform.y
+    }));
+
+    // Draw curved node body
+    const width = 12 * transform.k; // Approximate node width
+    this._drawCurvedNodeBody(curvePoints, width, bodyColor, borderColor, borderWidth);
+  }
+
+  /**
+   * Draw a curved node body through a series of control points
+   */
+  _drawCurvedNodeBody(points, width, bodyColor, borderColor, borderWidth) {
+    if (points.length < 2) return;
+
     const ctx = this.ctx;
 
-    // Calculate positions along the node's drawn length
-    for (let i = 1; i <= numSubvertices; i++) {
-      const ratio = i / (numSubvertices + 1); // Evenly spaced: 0.16, 0.33, 0.5, 0.66, 0.83
+    ctx.save();
 
-      // Calculate position along node body
-      const offset = (ratio - 0.5) * gfaNode.drawnLength;
-      const x = gfaNode.x + Math.cos(gfaNode.angle) * offset;
-      const y = gfaNode.y + Math.sin(gfaNode.angle) * offset;
+    // Draw colored body first (thick stroke with node color)
+    ctx.beginPath();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = width;
+    ctx.strokeStyle = bodyColor;
 
-      // Transform to screen coordinates
-      const screenX = x * transform.k + transform.x;
-      const screenY = y * transform.k + transform.y;
-
-      // Draw small blue dot (distinct from red/green subnodes)
-      ctx.fillStyle = 'rgba(100, 149, 237, 0.6)'; // Cornflower blue, semi-transparent
-      ctx.beginPath();
-      ctx.arc(screenX, screenY, 3 * transform.k, 0, 2 * Math.PI);
-      ctx.fill();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
     }
+
+    ctx.stroke();
+
+    // Draw thin border on top for selection/pin indication
+    ctx.beginPath();
+    ctx.lineWidth = borderWidth;
+    ctx.strokeStyle = borderColor;
+
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+
+    ctx.stroke();
+
+    ctx.restore();
   }
+
+  /**
+   * Get color for a node (hashed from ID)
+   */
+  _getNodeColor(node) {
+    const hash = String(node.id).split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0);
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue}, 70%, 60%)`;
+  }
+
 
   /**
    * Calculate auto-scaling factor based on total graph size
@@ -311,28 +432,53 @@ export class GfaRenderer extends Renderer {
   /**
    * Draw GFA edge with curve
    */
-  drawGfaEdge(edge, index, transform, isHighlighted, highlightedPath) {
+  drawGfaEdge(edge, index, transform, isHighlighted, highlightedPath, nodes) {
     const sourceId = edge.source.id || edge.source;
     const targetId = edge.target.id || edge.target;
 
+    // Get actual model nodes (may be chain segments)
+    const sourceModelNode = nodes?.find(n => n.id === sourceId);
+    const targetModelNode = nodes?.find(n => n.id === targetId);
+
+    // Get visual nodes
     const sourceNode = this.gfaVisualNodes.find(n => n.id === sourceId);
     const targetNode = this.gfaVisualNodes.find(n => n.id === targetId);
 
     if (!sourceNode || !targetNode) {
-      // Debug: Why is this edge not rendering?
-      if (!sourceNode) {
-        console.warn(`[GfaRenderer] Edge ${index}: source node "${sourceId}" not found in visual nodes`);
-      }
-      if (!targetNode) {
-        console.warn(`[GfaRenderer] Edge ${index}: target node "${targetId}" not found in visual nodes`);
-      }
+      // DIAGNOSTIC: Log missing visual nodes
+      console.warn(`[GfaRenderer] Edge ${sourceId} → ${targetId}: Missing visual nodes (source=${!!sourceNode}, target=${!!targetNode})`);
+      console.warn(`  Model nodes: source=${!!sourceModelNode}, target=${!!targetModelNode}`);
+      console.warn(`  Source is chain segment: ${sourceModelNode?.isChainSegment}, Target is chain segment: ${targetModelNode?.isChainSegment}`);
       return;
     }
 
-    // Determine edge direction based on GFA orientations
+    // Determine edge direction using normal logic first
     const edgeInfo = this.determineEdgeDirection(sourceNode, targetNode, edge);
-    const start = edgeInfo.fromSubnode;
-    const end = edgeInfo.toSubnode;
+    let start = edgeInfo.fromSubnode;
+    let end = edgeInfo.toSubnode;
+
+    // DIAGNOSTIC: Log edge drawing
+    const isChainEdge = sourceModelNode?.isChainSegment || targetModelNode?.isChainSegment;
+    if (isChainEdge) {
+      console.log(`[GfaRenderer] Drawing edge ${sourceId} → ${targetId}`);
+      console.log(`  Source: isChain=${sourceModelNode?.isChainSegment}, isLast=${sourceModelNode?.isLastSegment}, parentId=${sourceModelNode?.parentChainId}`);
+      console.log(`  Target: isChain=${targetModelNode?.isChainSegment}, isFirst=${targetModelNode?.isFirstSegment}, parentId=${targetModelNode?.parentChainId}`);
+      console.log(`  Initial positions: start=(${start.x}, ${start.y}), end=(${end.x}, ${end.y})`);
+    }
+
+    // Override with actual chain segment positions
+    // Use the exact segment position specified in the edge, not the subnode calculation
+    if (sourceModelNode?.isChainSegment) {
+      // Source is a chain segment - use its actual position
+      start = { x: sourceModelNode.x, y: sourceModelNode.y };
+      if (isChainEdge) console.log(`  Override start position: (${start.x}, ${start.y}) from chain segment ${sourceId}`);
+    }
+
+    if (targetModelNode?.isChainSegment) {
+      // Target is a chain segment - use its actual position
+      end = { x: targetModelNode.x, y: targetModelNode.y };
+      if (isChainEdge) console.log(`  Override end position: (${end.x}, ${end.y}) from chain segment ${targetId}`);
+    }
 
     this.ctx.save();
 
@@ -746,7 +892,10 @@ class GfaVisualNode {
   }
 
   createSegments() {
-    const numSegments = Math.max(2, Math.round(this.drawnLength / this.settings.nodeSegmentLength) + 1);
+    // Ensure all nodes have enough segments for articulated appearance
+    // Minimum 5 segments for small nodes, scaling up to 15 for longest nodes
+    const baseSegments = Math.round(this.drawnLength / this.settings.nodeSegmentLength) + 1;
+    const numSegments = Math.max(5, Math.min(15, baseSegments));
     const segmentLength = this.drawnLength / (numSegments - 1);
 
     this.segments = [];

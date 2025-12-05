@@ -219,4 +219,115 @@ export class GraphAdapter {
   getModel() {
     return this.model;
   }
+
+  /**
+   * Get chain information for a chain ID
+   * Returns the original node and segments if this is a chain
+   */
+  getChainInfo(chainId) {
+    if (!this.model._nodeChains) {
+      return null;
+    }
+    return this.model._nodeChains.get(String(chainId)) || null;
+  }
+
+  /**
+   * Check if an ID represents a chain (not a regular node)
+   */
+  isChain(id) {
+    return this.getChainInfo(id) !== null;
+  }
+
+  /**
+   * Get node or chain original node
+   * For regular nodes, returns the node
+   * For chains, returns the original node from chain metadata
+   */
+  getNodeOrChainOriginal(nodeId) {
+    // First try to get the regular node
+    const node = this.getNode(nodeId);
+    if (node) {
+      return node;
+    }
+
+    // If not found, check if it's a chain
+    const chainInfo = this.getChainInfo(nodeId);
+    if (chainInfo && chainInfo.originalNode) {
+      return chainInfo.originalNode;
+    }
+
+    return null;
+  }
+
+  /**
+   * Create chain segments from a node if it exceeds length threshold
+   * Returns { needsSplit: boolean, segments: [], internalLinks: [] }
+   * If needsSplit is false, segments will contain just the original node
+   */
+  createChainSegmentsIfNeeded(node, lengthThreshold = 50000, numSegments = 5) {
+    // Check if node needs splitting
+    if (!node.length || node.length <= lengthThreshold) {
+      return {
+        needsSplit: false,
+        segments: [node],
+        internalLinks: []
+      };
+    }
+
+    console.log(`[GraphAdapter] Creating chain segments for node ${node.id} (${node.length}bp → ${numSegments} segments)`);
+
+    // Create segments
+    const segments = [];
+    for (let i = 0; i < numSegments; i++) {
+      const segment = {
+        ...node, // Copy all properties from original node
+        id: `${node.id}_seg${i}`,
+        parentChainId: node.id,
+        segmentIndex: i,
+        isChainSegment: true,
+        isFirstSegment: i === 0,
+        isLastSegment: i === numSegments - 1,
+        length: node.length / numSegments,
+        // Preserve position
+        x: node.x,
+        y: node.y,
+        vx: 0,
+        vy: 0,
+        // Clear fixed positions
+        fx: null,
+        fy: null
+      };
+      segments.push(segment);
+    }
+
+    // Create internal chain links
+    const internalLinks = [];
+    for (let i = 0; i < segments.length - 1; i++) {
+      internalLinks.push({
+        source: segments[i].id,
+        target: segments[i + 1].id,
+        isInternalChainLink: true,
+        parentChainId: node.id,
+        gfaType: 'internal_chain'
+      });
+    }
+
+    // Store chain metadata in model
+    if (!this.model._nodeChains) {
+      this.model._nodeChains = new Map();
+    }
+    this.model._nodeChains.set(String(node.id), {
+      originalNode: { ...node },
+      segments: segments,
+      segmentIds: segments.map(s => s.id)
+    });
+
+    console.log(`[GraphAdapter] Created ${segments.length} segments with ${internalLinks.length} internal links`);
+
+    return {
+      needsSplit: true,
+      segments: segments,
+      internalLinks: internalLinks
+    };
+  }
 }

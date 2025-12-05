@@ -267,8 +267,21 @@ function handleNodeClick(nodeId) {
   // Show node information
   let infoHTML = `<strong>Node ${node.id}</strong>`;
 
-  // Check if merged node
-  if (isMergedNode(node)) {
+  // Check if this is a chain segment
+  if (node.isChainSegment && node.parentChainId) {
+    infoHTML += `<br><em>Type: Chain Segment (${node.segmentIndex + 1})</em>`;
+    infoHTML += `<br><em>Parent Chain: ${node.parentChainId}</em>`;
+    infoHTML += `<br><br><em>Note: Resolution will apply to entire parent chain</em>`;
+    // Show parent chain's connections for resolution
+    const connections = getChainConnections(node.parentChainId);
+    const physicalConnections = getChainPhysicalConnections(node.parentChainId);
+    if (connections && physicalConnections) {
+      infoHTML += `<br><em>Chain Logical: ${connections.incoming.length} in, ${connections.outgoing.length} out</em>`;
+      infoHTML += `<br><em>Chain Physical: ${physicalConnections.red.length} red, ${physicalConnections.green.length} green</em>`;
+    }
+    infoHTML += `<pre>${JSON.stringify(node, null, 2)}</pre>`;
+  } else if (isMergedNode(node)) {
+    // Merged node info
     const mergedInfo = getMergedNodeInfo(node);
     infoHTML += `<br><em>Type: ${mergedInfo.type}</em>`;
     infoHTML += `<br><em>Merged from: ${mergedInfo.originalNodes.join(', ')}</em>`;
@@ -312,13 +325,26 @@ function updateResolveButton() {
   resolveBtn.disabled = !hasSelection;
 
   if (hasSelection) {
-    const vertexId = Array.from(selectedNodes)[0];
-    const connections = getVertexConnections(vertexId);
-    const totalConnections = connections.incoming.length + connections.outgoing.length;
+    const selectedNodeId = Array.from(selectedNodes)[0];
+    const selectedNode = model.getNode(selectedNodeId);
+    let connections;
 
-    if (totalConnections > 1) {
-      resolveBtn.textContent = `Resolve Vertex (${totalConnections} edges)`;
-      resolveBtn.disabled = false;
+    // If a chain segment is selected, get chain connections
+    if (selectedNode && selectedNode.isChainSegment && selectedNode.parentChainId) {
+      connections = getChainConnections(selectedNode.parentChainId);
+    } else {
+      connections = getVertexConnections(selectedNodeId);
+    }
+
+    if (connections) {
+      const totalConnections = connections.incoming.length + connections.outgoing.length;
+      if (totalConnections > 1) {
+        resolveBtn.textContent = `Resolve Vertex (${totalConnections} edges)`;
+        resolveBtn.disabled = false;
+      } else {
+        resolveBtn.textContent = 'Resolve Vertex';
+        resolveBtn.disabled = true;
+      }
     } else {
       resolveBtn.textContent = 'Resolve Vertex';
       resolveBtn.disabled = true;
@@ -336,13 +362,26 @@ function updatePhysicalResolveButton() {
   resolveBtn.disabled = !hasSelection;
 
   if (hasSelection) {
-    const vertexId = Array.from(selectedNodes)[0];
-    const connections = getPhysicalConnections(vertexId);
-    const totalConnections = connections.red.length + connections.green.length;
+    const selectedNodeId = Array.from(selectedNodes)[0];
+    const selectedNode = model.getNode(selectedNodeId);
+    let connections;
 
-    if (totalConnections > 1) {
-      resolveBtn.textContent = `Resolve Physical (${connections.red.length}R+${connections.green.length}G)`;
-      resolveBtn.disabled = false;
+    // If a chain segment is selected, get chain connections
+    if (selectedNode && selectedNode.isChainSegment && selectedNode.parentChainId) {
+      connections = getChainPhysicalConnections(selectedNode.parentChainId);
+    } else {
+      connections = getPhysicalConnections(selectedNodeId);
+    }
+
+    if (connections) {
+      const totalConnections = connections.red.length + connections.green.length;
+      if (totalConnections > 1) {
+        resolveBtn.textContent = `Resolve Physical (${connections.red.length}R+${connections.green.length}G)`;
+        resolveBtn.disabled = false;
+      } else {
+        resolveBtn.textContent = 'Resolve Physical';
+        resolveBtn.disabled = true;
+      }
     } else {
       resolveBtn.textContent = 'Resolve Physical';
       resolveBtn.disabled = true;
@@ -877,7 +916,9 @@ function setupLegacyOperations() {
   document.getElementById('resolveVertex').onclick = () => {
     const selectedNodes = model.selectedNodes;
     if (selectedNodes.size === 1) {
-      const vertexId = Array.from(selectedNodes)[0];
+      const selectedNodeId = Array.from(selectedNodes)[0];
+      // If a chain segment is selected, resolve the parent chain instead
+      const vertexId = getResolvableNodeId(selectedNodeId);
       showResolveDialog(vertexId);
     }
   };
@@ -886,7 +927,9 @@ function setupLegacyOperations() {
   document.getElementById('resolvePhysical').onclick = () => {
     const selectedNodes = model.selectedNodes;
     if (selectedNodes.size === 1) {
-      const vertexId = Array.from(selectedNodes)[0];
+      const selectedNodeId = Array.from(selectedNodes)[0];
+      // If a chain segment is selected, resolve the parent chain instead
+      const vertexId = getResolvableNodeId(selectedNodeId);
       showPhysicalResolveDialog(vertexId);
     }
   };
@@ -1008,6 +1051,123 @@ function setupLegacyOperations() {
 
 // ===== VERTEX RESOLUTION FUNCTIONS (Legacy - kept as-is) =====
 
+/**
+ * Get connections for a chain by combining endpoint segments' connections
+ * Returns null if not a chain
+ */
+function getChainConnections(parentChainId) {
+  // Find all segments of this chain
+  const segments = model.nodes.filter(n =>
+    n.isChainSegment && n.parentChainId === parentChainId
+  );
+
+  if (segments.length === 0) return null;
+
+  // Find first and last segments
+  const firstSegment = segments.find(s => s.isFirstSegment);
+  const lastSegment = segments.find(s => s.isLastSegment);
+
+  if (!firstSegment || !lastSegment) return null;
+
+  // Get connections from endpoints
+  const firstConns = getVertexConnections(firstSegment.id);
+  const lastConns = getVertexConnections(lastSegment.id);
+
+  // Combine: incoming from first segment, outgoing from last segment
+  // But exclude internal chain links
+  const incoming = firstConns.incoming.filter(conn =>
+    !conn.link.isInternalChainLink
+  );
+  const outgoing = lastConns.outgoing.filter(conn =>
+    !conn.link.isInternalChainLink
+  );
+
+  return { incoming, outgoing };
+}
+
+/**
+ * Get physical connections for a chain by combining endpoint segments' connections
+ */
+function getChainPhysicalConnections(parentChainId) {
+  // Find all segments of this chain
+  const segments = model.nodes.filter(n =>
+    n.isChainSegment && n.parentChainId === parentChainId
+  );
+
+  if (segments.length === 0) return null;
+
+  // Find first and last segments
+  const firstSegment = segments.find(s => s.isFirstSegment);
+  const lastSegment = segments.find(s => s.isLastSegment);
+
+  if (!firstSegment || !lastSegment) return null;
+
+  // Get connections from endpoints
+  const firstConns = getPhysicalConnections(firstSegment.id);
+  const lastConns = getPhysicalConnections(lastSegment.id);
+
+  // Combine red and green connections, excluding internal chain links
+  const red = [...firstConns.red, ...lastConns.red].filter(conn =>
+    !conn.link.isInternalChainLink
+  );
+  const green = [...firstConns.green, ...lastConns.green].filter(conn =>
+    !conn.link.isInternalChainLink
+  );
+
+  return { red, green };
+}
+
+/**
+ * Get the actual node ID to use for resolution
+ * If the selected node is a chain segment, return its parent chain ID
+ * Otherwise, return the node ID itself
+ */
+function getResolvableNodeId(nodeId) {
+  console.log(`[Resolution] getResolvableNodeId called with: ${nodeId}`);
+  const node = model.getNode(nodeId);
+
+  if (!node) {
+    console.warn(`[Resolution] Node ${nodeId} not found in model`);
+    // Try to parse parent chain ID from segment ID format
+    // Formats: "123_seg0", "123.0", "-567021.20", etc.
+    const nodeIdStr = String(nodeId);
+
+    // Check for decimal format (e.g., "-567021.20")
+    if (nodeIdStr.includes('.')) {
+      const parentChainId = nodeIdStr.split('.')[0];
+      console.log(`[Resolution] Parsed parent chain ID from decimal format: ${parentChainId}`);
+      return parentChainId;
+    }
+
+    // Check for _seg format (e.g., "123_seg0")
+    if (nodeIdStr.includes('_seg')) {
+      const parentChainId = nodeIdStr.split('_seg')[0];
+      console.log(`[Resolution] Parsed parent chain ID from _seg format: ${parentChainId}`);
+      return parentChainId;
+    }
+
+    // If we can't parse it, return original ID
+    console.warn(`[Resolution] Could not parse parent chain ID from: ${nodeId}`);
+    return nodeId;
+  }
+
+  console.log(`[Resolution] Found node:`, {
+    id: node.id,
+    isChainSegment: node.isChainSegment,
+    parentChainId: node.parentChainId,
+    segmentIndex: node.segmentIndex
+  });
+
+  // If this is a chain segment, use the parent chain ID instead
+  if (node.isChainSegment && node.parentChainId) {
+    console.log(`[Resolution] Node ${nodeId} is a chain segment, using parent ${node.parentChainId} for resolution`);
+    return node.parentChainId;
+  }
+
+  console.log(`[Resolution] Node ${nodeId} is not a chain segment, using as-is`);
+  return nodeId;
+}
+
 function getVertexConnections(vertexId) {
   const incoming = [];
   const outgoing = [];
@@ -1107,10 +1267,21 @@ function getPhysicalConnections(vertexId) {
 // VertexResolution.generatePathCombinations() and PhysicalVertexResolution.generatePhysicalCombinations()
 
 function showResolveDialog(vertexId) {
+  // Check if this is a chain ID (not an actual node)
   const vertex = model.getNode(vertexId);
-  if (!vertex) return;
+  let connections;
 
-  const connections = getVertexConnections(vertexId);
+  if (!vertex) {
+    // Might be a chain - try to get chain connections
+    connections = getChainConnections(vertexId);
+    if (!connections) {
+      console.error(`[Resolution] Cannot find node or chain for ID: ${vertexId}`);
+      return;
+    }
+  } else {
+    connections = getVertexConnections(vertexId);
+  }
+
   const combinations = VertexResolution.generatePathCombinations(connections.incoming, connections.outgoing);
 
   document.getElementById('vertexInfo').innerHTML = `
@@ -1160,7 +1331,7 @@ function showResolveDialog(vertexId) {
   });
 
   window.currentResolution = {
-    vertex: vertex,
+    vertexId: vertexId,  // Store ID instead of vertex object (which might be null for chains)
     combinations: combinations,
     connections: connections
   };
@@ -1170,10 +1341,21 @@ function showResolveDialog(vertexId) {
 }
 
 function showPhysicalResolveDialog(vertexId) {
+  // Check if this is a chain ID (not an actual node)
   const vertex = model.getNode(vertexId);
-  if (!vertex) return;
+  let connections;
 
-  const connections = getPhysicalConnections(vertexId);
+  if (!vertex) {
+    // Might be a chain - try to get chain connections
+    connections = getChainPhysicalConnections(vertexId);
+    if (!connections) {
+      console.error(`[Resolution] Cannot find node or chain for ID: ${vertexId}`);
+      return;
+    }
+  } else {
+    connections = getPhysicalConnections(vertexId);
+  }
+
   const combinations = PhysicalVertexResolution.generatePhysicalCombinations(connections.red, connections.green);
 
   document.getElementById('vertexInfo').innerHTML = `
@@ -1220,7 +1402,7 @@ function showPhysicalResolveDialog(vertexId) {
   });
 
   window.currentPhysicalResolution = {
-    vertex: vertex,
+    vertexId: vertexId,  // Store ID instead of vertex object (which might be null for chains)
     combinations: combinations,
     connections: connections
   };
@@ -1246,7 +1428,7 @@ function hideResolveDialog() {
 function performVertexResolution() {
   if (!window.currentResolution) return;
 
-  const { vertex, combinations } = window.currentResolution;
+  const { vertexId, combinations } = window.currentResolution;
   const selectedCombos = [];
 
   document.querySelectorAll('#pathCombinations input[type="checkbox"]:checked').forEach(checkbox => {
@@ -1262,19 +1444,19 @@ function performVertexResolution() {
   console.log('=== LOGICAL VERTEX RESOLUTION (Operation-based) ===');
   const originalPaths = [...model.savedPaths];
 
-  logEvent(`Resolving vertex ${vertex.id} into ${selectedCombos.length} copies`);
+  logEvent(`Resolving vertex ${vertexId} into ${selectedCombos.length} copies`);
 
   try {
     // Create adapter and operation
     const graphAdapter = new GraphAdapter(model);
-    const resolution = new VertexResolution(graphAdapter, vertex.id, selectedCombos);
+    const resolution = new VertexResolution(graphAdapter, vertexId, selectedCombos);
 
     // Execute resolution
     const result = resolution.execute();
 
     // Update paths
     const resolutionData = {
-      originalVertex: vertex,
+      originalVertex: { id: vertexId },  // Create minimal object for compatibility
       newVertices: result.newVertices,
       resolutionType: 'logical'
     };
@@ -1283,14 +1465,14 @@ function performVertexResolution() {
     model._savedPaths = updatedPaths;
 
     // Show summary
-    const summary = showPathUpdateSummary(originalPaths, updatedPaths, vertex.id);
+    const summary = showPathUpdateSummary(originalPaths, updatedPaths, vertexId);
     logEvent(summary);
 
     const affectedPaths = originalPaths.filter(path =>
-      Array.from(path.nodes).includes(vertex.id)
+      Array.from(path.nodes).includes(vertexId)
     );
     if (affectedPaths.length > 0) {
-      showPathUpdateDialog(originalPaths, updatedPaths, vertex.id);
+      showPathUpdateDialog(originalPaths, updatedPaths, vertexId);
     }
 
     // Clear selection and update UI
@@ -1313,7 +1495,7 @@ function performVertexResolution() {
 function performPhysicalResolution() {
   if (!window.currentPhysicalResolution) return;
 
-  const { vertex, combinations } = window.currentPhysicalResolution;
+  const { vertexId, combinations } = window.currentPhysicalResolution;
   const selectedCombos = [];
 
   document.querySelectorAll('#pathCombinations input[type="checkbox"]:checked').forEach(checkbox => {
@@ -1329,19 +1511,19 @@ function performPhysicalResolution() {
   console.log('=== PHYSICAL VERTEX RESOLUTION (Operation-based) ===');
   const originalPaths = [...model.savedPaths];
 
-  logEvent(`Physical resolving vertex ${vertex.id} into ${selectedCombos.length} copies`);
+  logEvent(`Physical resolving vertex ${vertexId} into ${selectedCombos.length} copies`);
 
   try {
     // Create adapter and operation
     const graphAdapter = new GraphAdapter(model);
-    const resolution = new PhysicalVertexResolution(graphAdapter, vertex.id, selectedCombos);
+    const resolution = new PhysicalVertexResolution(graphAdapter, vertexId, selectedCombos);
 
     // Execute resolution
     const result = resolution.execute();
 
     // Update paths
     const resolutionData = {
-      originalVertex: vertex,
+      originalVertex: { id: vertexId },  // Create minimal object for compatibility
       newVertices: result.newVertices,
       resolutionType: 'physical'
     };
@@ -1350,14 +1532,14 @@ function performPhysicalResolution() {
     model._savedPaths = updatedPaths;
 
     // Show summary
-    const summary = showPathUpdateSummary(originalPaths, updatedPaths, vertex.id);
+    const summary = showPathUpdateSummary(originalPaths, updatedPaths, vertexId);
     logEvent(summary);
 
     const affectedPaths = originalPaths.filter(path =>
-      Array.from(path.nodes).includes(vertex.id)
+      Array.from(path.nodes).includes(vertexId)
     );
     if (affectedPaths.length > 0) {
-      showPathUpdateDialog(originalPaths, updatedPaths, vertex.id);
+      showPathUpdateDialog(originalPaths, updatedPaths, vertexId);
     }
 
     // Clear selection and update UI

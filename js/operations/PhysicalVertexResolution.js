@@ -28,9 +28,10 @@ export class PhysicalVertexResolution extends Operation {
    * Validate if operation can be executed
    */
   validate() {
-    const vertex = this.graph.getNode(this.vertexId);
+    // Use getNodeOrChainOriginal to support both regular nodes and chains
+    const vertex = this.graph.getNodeOrChainOriginal(this.vertexId);
     if (!vertex) {
-      throw new Error(`Vertex ${this.vertexId} not found`);
+      throw new Error(`Vertex ${this.vertexId} not found (neither as node nor chain)`);
     }
 
     if (!this.selectedCombinations || this.selectedCombinations.length === 0) {
@@ -52,8 +53,9 @@ export class PhysicalVertexResolution extends Operation {
       edges: this.graph.getEdges().map(e => this.cloneObject(e))
     });
 
-    // Get vertex
-    this.vertex = this.graph.getNode(this.vertexId);
+    // Get vertex (works for both regular nodes and chains)
+    this.vertex = this.graph.getNodeOrChainOriginal(this.vertexId);
+    console.log(`[PhysicalVertexResolution] Retrieved vertex/chain:`, this.vertex);
 
     // Get physical connections
     this.connections = this.getPhysicalConnections(this.vertexId);
@@ -64,17 +66,32 @@ export class PhysicalVertexResolution extends Operation {
     this.newNodes = this.createNewNodes();
 
     // MATCH LEGACY: Directly manipulate model's internal arrays to preserve D3 references
-    // Remove original vertex
     const model = this.graph.getModel();
-    model._nodes = model._nodes.filter(n => n.id !== this.vertexId);
 
-    // Remove edges connected to original vertex
+    // Check if this is a chain - if so, remove all segments instead of the original vertex
+    const chainInfo = this.graph.getChainInfo(this.vertexId);
+    let nodesToRemove = [];
+
+    if (chainInfo) {
+      // This is a chain - remove all segments
+      nodesToRemove = chainInfo.segmentIds;
+      console.log(`[PhysicalVertexResolution] Removing chain segments:`, nodesToRemove);
+    } else {
+      // Regular node - remove just this node
+      nodesToRemove = [this.vertexId];
+      console.log(`[PhysicalVertexResolution] Removing regular node:`, this.vertexId);
+    }
+
+    // Remove nodes (either chain segments or regular node)
+    const nodesToRemoveSet = new Set(nodesToRemove.map(String));
+    model._nodes = model._nodes.filter(n => !nodesToRemoveSet.has(String(n.id)));
+
+    // Remove edges connected to removed nodes
     // CRITICAL: Use String() to ensure type-safe comparison (IDs might be numbers or strings)
-    const vertexIdStr = String(this.vertexId);
     model._links = model._links.filter(link => {
       const sourceId = String((typeof link.source === 'object') ? link.source.id : link.source);
       const targetId = String((typeof link.target === 'object') ? link.target.id : link.target);
-      return sourceId !== vertexIdStr && targetId !== vertexIdStr;
+      return !nodesToRemoveSet.has(sourceId) && !nodesToRemoveSet.has(targetId);
     });
 
     // Add new nodes (don't clone - D3 needs to mutate these directly)
@@ -98,7 +115,7 @@ export class PhysicalVertexResolution extends Operation {
     model.emit('graphStructureChanged', {
       reason: 'physicalVertexResolution',
       nodesAdded: this.newNodes.length,
-      nodesRemoved: 1,
+      nodesRemoved: nodesToRemove.length,  // Use actual count (1 for regular node, multiple for chain)
       edgesAdded: this.newLinks.length,
       edgesRemoved: this.connections.red.length + this.connections.green.length
     });
@@ -213,10 +230,12 @@ export class PhysicalVertexResolution extends Operation {
 
   /**
    * Create new nodes from selected combinations
-   * EXACT COPY from main.js performPhysicalResolution()
+   * Chain-aware: creates chain segments for long nodes during resolution
    */
   createNewNodes() {
-    const newNodes = [];
+    const allSegments = [];
+    const allInternalLinks = [];
+    const nodeMapping = new Map(); // Maps logical node ID to first/last segment IDs
     const selectedCombos = this.selectedCombinations;
     const vertex = this.vertex;
 
@@ -245,15 +264,40 @@ export class PhysicalVertexResolution extends Operation {
         newNode.y = vertex.y + radius * Math.sin(angleOffset);
       }
 
-      newNodes.push(newNode);
+      // Check if this node needs to be split into a chain (GFA only with long nodes)
+      const chainData = this.graph.createChainSegmentsIfNeeded(newNode, 50000, 5);
+
+      if (chainData.needsSplit) {
+        // Node was split - add all segments and internal links
+        console.log(`[PhysicalVertexResolution] Node ${newNodeId} split into ${chainData.segments.length} segments`);
+        allSegments.push(...chainData.segments);
+        allInternalLinks.push(...chainData.internalLinks);
+
+        // Store mapping for link creation (connect to first/last segments)
+        nodeMapping.set(newNodeId, {
+          firstSegmentId: chainData.segments[0].id,
+          lastSegmentId: chainData.segments[chainData.segments.length - 1].id
+        });
+      } else {
+        // Regular node - just add it
+        allSegments.push(newNode);
+        nodeMapping.set(newNodeId, {
+          firstSegmentId: newNodeId,
+          lastSegmentId: newNodeId
+        });
+      }
     });
 
-    return newNodes;
+    // Store for use in createNewLinks()
+    this.nodeMapping = nodeMapping;
+    this.internalChainLinks = allInternalLinks;
+
+    return allSegments;
   }
 
   /**
    * Create new links from selected physical combinations
-   * EXACT COPY from main.js performPhysicalResolution()
+   * Chain-aware: connects to first/last segments for chains
    */
   createNewLinks() {
     const newLinks = [];
@@ -264,27 +308,60 @@ export class PhysicalVertexResolution extends Operation {
 
     selectedCombos.forEach((combo, index) => {
       const newNodeId = selectedCombos.length === 1 ? vertex.id : `${vertex.id}_p${index + 1}`;
+      const mapping = this.nodeMapping.get(newNodeId);
+
+      if (!mapping) {
+        console.error(`[PhysicalVertexResolution] No mapping found for node ${newNodeId}`);
+        return;
+      }
 
       console.log(`[PhysicalVertexResolution] Combo ${index}: newNodeId=${newNodeId}`);
+      console.log(`[PhysicalVertexResolution]   Mapping: first=${mapping.firstSegmentId}, last=${mapping.lastSegmentId}`);
       console.log(`[PhysicalVertexResolution]   Red:`, combo.red);
       console.log(`[PhysicalVertexResolution]   Green:`, combo.green);
 
-      // Red connection
+      // Validate external node references
+      if (combo.red) {
+        const externalId = combo.red.direction === 'incoming' ? combo.red.sourceId : combo.red.targetId;
+        const externalNode = this.graph.getNode(externalId);
+        if (!externalNode) {
+          console.warn(`[PhysicalVertexResolution] WARNING: External red node ${externalId} not found!`);
+        }
+      }
+      if (combo.green) {
+        const externalId = combo.green.direction === 'incoming' ? combo.green.sourceId : combo.green.targetId;
+        const externalNode = this.graph.getNode(externalId);
+        if (!externalNode) {
+          console.warn(`[PhysicalVertexResolution] WARNING: External green node ${externalId} not found!`);
+        }
+      }
+
+      // Red connection (negative orientation - connects to start of chain)
       if (combo.red) {
         const originalLink = combo.red.link;
         let newLink;
 
         if (combo.red.direction === 'incoming') {
+          // Incoming red edge → connect to FIRST segment (chain start)
           newLink = {
-            ...originalLink,
-            target: newNodeId,
-            source: combo.red.sourceId
+            source: combo.red.sourceId,
+            target: mapping.firstSegmentId,
+            // Preserve GFA orientation metadata
+            srcOrientation: originalLink.srcOrientation,
+            tgtOrientation: originalLink.tgtOrientation,
+            gfaType: originalLink.gfaType,
+            overlap: originalLink.overlap
           };
         } else {
+          // Outgoing red edge → connect from FIRST segment (chain start)
           newLink = {
-            ...originalLink,
-            source: newNodeId,
-            target: combo.red.targetId
+            source: mapping.firstSegmentId,
+            target: combo.red.targetId,
+            // Preserve GFA orientation metadata
+            srcOrientation: originalLink.srcOrientation,
+            tgtOrientation: originalLink.tgtOrientation,
+            gfaType: originalLink.gfaType,
+            overlap: originalLink.overlap
           };
         }
 
@@ -292,26 +369,36 @@ export class PhysicalVertexResolution extends Operation {
         if (typeof newLink.source === 'object') newLink.source = newLink.source.id;
         if (typeof newLink.target === 'object') newLink.target = newLink.target.id;
 
-        console.log(`[PhysicalVertexResolution]   Created RED link: ${newLink.source} -> ${newLink.target}`, newLink);
+        console.log(`[PhysicalVertexResolution]   Created RED link: ${newLink.source}[${newLink.srcOrientation}] -> ${newLink.target}[${newLink.tgtOrientation}]`);
         newLinks.push(newLink);
       }
 
-      // Green connection
+      // Green connection (positive orientation - connects to end of chain)
       if (combo.green) {
         const originalLink = combo.green.link;
         let newLink;
 
         if (combo.green.direction === 'incoming') {
+          // Incoming green edge → connect to LAST segment (chain end)
           newLink = {
-            ...originalLink,
-            target: newNodeId,
-            source: combo.green.sourceId
+            source: combo.green.sourceId,
+            target: mapping.lastSegmentId,
+            // Preserve GFA orientation metadata
+            srcOrientation: originalLink.srcOrientation,
+            tgtOrientation: originalLink.tgtOrientation,
+            gfaType: originalLink.gfaType,
+            overlap: originalLink.overlap
           };
         } else {
+          // Outgoing green edge → connect from LAST segment (chain end)
           newLink = {
-            ...originalLink,
-            source: newNodeId,
-            target: combo.green.targetId
+            source: mapping.lastSegmentId,
+            target: combo.green.targetId,
+            // Preserve GFA orientation metadata
+            srcOrientation: originalLink.srcOrientation,
+            tgtOrientation: originalLink.tgtOrientation,
+            gfaType: originalLink.gfaType,
+            overlap: originalLink.overlap
           };
         }
 
@@ -319,10 +406,13 @@ export class PhysicalVertexResolution extends Operation {
         if (typeof newLink.source === 'object') newLink.source = newLink.source.id;
         if (typeof newLink.target === 'object') newLink.target = newLink.target.id;
 
-        console.log(`[PhysicalVertexResolution]   Created GREEN link: ${newLink.source} -> ${newLink.target}`, newLink);
+        console.log(`[PhysicalVertexResolution]   Created GREEN link: ${newLink.source}[${newLink.srcOrientation}] -> ${newLink.target}[${newLink.tgtOrientation}]`);
         newLinks.push(newLink);
       }
     });
+
+    // Add internal chain links
+    newLinks.push(...this.internalChainLinks);
 
     console.log(`[PhysicalVertexResolution] Total new links created: ${newLinks.length}`);
     return newLinks;

@@ -182,6 +182,20 @@ export class GraphController extends EventEmitter {
           // Apply rotational alignment to GFA nodes for cleaner layout
           console.log('[GraphController] Applying rotational alignment for cleaner layout');
           this.layoutManager.applyRotationalAlignment();
+
+          // Split long nodes into chains for natural curving (GFA only)
+          if (this.model.format === 'gfa') {
+            console.log('[GraphController] Splitting long nodes into chains for natural curving');
+            this.model.splitLongNodesIntoChains(50000, 5, 'system');
+
+            // Restart simulation with the new chain structure
+            this.layoutManager.start(
+              this.model._nodes,
+              this.model._links,
+              this.view.canvas.width,
+              this.view.canvas.height
+            );
+          }
         }
       };
 
