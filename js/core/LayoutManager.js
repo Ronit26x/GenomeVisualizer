@@ -138,15 +138,15 @@ export class LayoutManager extends EventEmitter {
     this.simulation = d3.forceSimulation(nodes)
       .force('charge', d3.forceManyBody().strength(d => {
         // Reduce charge for chain segments to prevent excessive repulsion
-        return d.isChainSegment ? -100 : -300;
+        return d.isChainSegment ? -30 : -80;
       }))
       .force('link', d3.forceLink(links)
         .id(d => d.id)
         .distance(link => {
           // Internal chain links: very short distance (tight chains)
-          if (link.isInternalChainLink) return 20;
-          // External links: normal distance
-          return 100;
+          if (link.isInternalChainLink) return 10;
+          // External links: much shorter distance for compact layout
+          return 20;
         })
         .strength(link => {
           // Internal chain links: very strong (keep chain together)
@@ -212,15 +212,15 @@ export class LayoutManager extends EventEmitter {
     this.simulation = d3.forceSimulation(nodes)
       .force('charge', d3.forceManyBody().strength(d => {
         // Reduce charge for chain segments to prevent excessive repulsion
-        return d.isChainSegment ? -100 : -300;
+        return d.isChainSegment ? -30 : -80;
       }))
       .force('link', d3.forceLink(links)
         .id(d => d.id)
         .distance(link => {
           // Internal chain links: very short distance (tight chains)
-          if (link.isInternalChainLink) return 20;
-          // External links: normal distance
-          return 100;
+          if (link.isInternalChainLink) return 10;
+          // External links: much shorter distance for compact layout
+          return 20;
         })
         .strength(link => {
           // Internal chain links: very strong (keep chain together)
