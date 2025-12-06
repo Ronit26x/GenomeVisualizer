@@ -1,5 +1,7 @@
 // path-updater.js - FULL DEBUG: Show exactly what edges exist
 
+import { getBaseNodeId, findAllSegments } from '../chain-utils.js';
+
 /**
  * Updates all saved paths after a vertex resolution operation
  */
@@ -20,9 +22,24 @@ export function updatePathsAfterResolution(savedPaths, resolutionData, nodes, li
 
     if (resolvedIndex === -1) {
       // Path doesn't contain resolved vertex - but must recalculate edges since graph structure changed
+      // Also need to expand nodes to include all segments
+      const pathNodeIds = path.sequence.split(',').map(id => id.trim());
+      const expandedNodes = new Set();
+
+      pathNodeIds.forEach(nodeId => {
+        const baseId = getBaseNodeId(nodeId);
+        const segments = findAllSegments(baseId, nodes);
+
+        if (segments.length > 0) {
+          segments.forEach(seg => expandedNodes.add(seg.id));
+        } else {
+          expandedNodes.add(nodeId);
+        }
+      });
+
       const unchangedPath = {
         ...path,
-        nodes: new Set(path.nodes),
+        nodes: expandedNodes,
         edges: new Set()
       };
       recalculatePathEdges(unchangedPath, links);
@@ -62,17 +79,32 @@ export function updatePathsAfterResolution(savedPaths, resolutionData, nodes, li
     if (foundReplacement) {
       const updatedSequence = [...pathSequence];
       updatedSequence[resolvedIndex] = foundReplacement.id;
-      
+
+      // Expand all node IDs to include their chain segments
+      const expandedNodes = new Set();
+      updatedSequence.forEach(nodeId => {
+        const baseId = getBaseNodeId(nodeId);
+        const segments = findAllSegments(baseId, nodes);
+
+        if (segments.length > 0) {
+          // Add all segments for this base node
+          segments.forEach(seg => expandedNodes.add(seg.id));
+        } else {
+          // Not a chain, just add the node itself
+          expandedNodes.add(nodeId);
+        }
+      });
+
       const updatedPath = {
         ...path,
         sequence: updatedSequence.join(','),
-        nodes: new Set(updatedSequence),
+        nodes: expandedNodes,  // Use expanded set including all segments
         edges: new Set(),
         lastUpdated: new Date(),
         updateReason: `${originalVertex.id} → ${foundReplacement.id}`,
         originalCoreVertex: originalVertex.id
       };
-      
+
       recalculatePathEdges(updatedPath, links);
       updatedPaths.push(updatedPath);
       
@@ -207,9 +239,11 @@ function findRelevantEdges(nodeA, nodeB, links) {
 
 /**
  * Normalize node IDs for consistent comparison
+ * Also extracts base node ID from chain segments (e.g., "node1_seg0" → "node1")
  */
 function normalizeId(id) {
-  return String(id).trim();
+  const normalized = String(id).trim();
+  return getBaseNodeId(normalized);
 }
 
 /**
@@ -229,28 +263,33 @@ function recalculatePathEdges(updatedPath, links) {
       const linkSourceId = normalizeId(link.source.id || link.source);
       const linkTargetId = normalizeId(link.target.id || link.target);
 
+      // Check if this link connects source base node to target base node (in either direction)
       if ((linkSourceId === sourceId && linkTargetId === targetId) ||
           (linkSourceId === targetId && linkTargetId === sourceId)) {
-        pathEdges.add(index);
+        // Don't include internal chain links
+        if (!link.isInternalChainLink) {
+          pathEdges.add(index);
+        }
       }
     });
   }
 
   updatedPath.edges = pathEdges;
-  console.log(`Recalculated ${pathEdges.size} edges`);
+  console.log(`Recalculated ${pathEdges.size} edges (excluding internal chain links)`);
 }
 
 /**
  * Show a summary of path updates to the user
  */
 export function showPathUpdateSummary(originalPaths, updatedPaths, originalVertexId) {
+  const normalizedVertexId = normalizeId(originalVertexId);
   const affectedPaths = originalPaths.filter(path => {
     const pathNodes = path.sequence.split(',').map(id => normalizeId(id.trim()));
-    return pathNodes.includes(normalizeId(originalVertexId));
+    return pathNodes.includes(normalizedVertexId);
   });
   
-  const updatedCount = updatedPaths.filter(path => 
-    path.originalCoreVertex === originalVertexId
+  const updatedCount = updatedPaths.filter(path =>
+    normalizeId(path.originalCoreVertex) === normalizedVertexId
   ).length;
   
   const removedCount = affectedPaths.length - updatedCount;

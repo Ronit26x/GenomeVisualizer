@@ -1511,9 +1511,12 @@ function performVertexResolution() {
     const summary = showPathUpdateSummary(originalPaths, updatedPaths, vertexId);
     logEvent(summary);
 
-    const affectedPaths = originalPaths.filter(path =>
-      Array.from(path.nodes).includes(vertexId)
-    );
+    // Check for affected paths using base node IDs (handles chain segments)
+    const vertexBaseId = getBaseNodeId(vertexId);
+    const affectedPaths = originalPaths.filter(path => {
+      const pathNodeIds = path.sequence.split(',').map(id => getBaseNodeId(id.trim()));
+      return pathNodeIds.includes(vertexBaseId);
+    });
     if (affectedPaths.length > 0) {
       showPathUpdateDialog(originalPaths, updatedPaths, vertexId);
     }
@@ -1578,9 +1581,12 @@ function performPhysicalResolution() {
     const summary = showPathUpdateSummary(originalPaths, updatedPaths, vertexId);
     logEvent(summary);
 
-    const affectedPaths = originalPaths.filter(path =>
-      Array.from(path.nodes).includes(vertexId)
-    );
+    // Check for affected paths using base node IDs (handles chain segments)
+    const vertexBaseId = getBaseNodeId(vertexId);
+    const affectedPaths = originalPaths.filter(path => {
+      const pathNodeIds = path.sequence.split(',').map(id => getBaseNodeId(id.trim()));
+      return pathNodeIds.includes(vertexBaseId);
+    });
     if (affectedPaths.length > 0) {
       showPathUpdateDialog(originalPaths, updatedPaths, vertexId);
     }
