@@ -1,18 +1,22 @@
 // NodeMerger.js - Operation for merging linear node chains
 
 import { Operation } from './Operation.js';
+import { getBaseNodeId, findAllSegments } from '../utils/chain-utils.js';
 
 /**
  * NodeMerger operation merges linear node chains into a single merged node.
  * Stores original nodes and links for sequence reconstruction.
+ * Works with BASE NODES only, ignoring chain segments.
  */
 export class NodeMerger extends Operation {
   constructor(graph, startNodeId) {
     super('NodeMerger', `Merge linear chain from node ${startNodeId}`);
 
-    console.log('[NodeMerger] VERSION 2.0 - With chainEnd tracking');
+    console.log('[NodeMerger] VERSION 3.0 - Chain-aware base node merging');
     this.graph = graph;
-    this.startNodeId = startNodeId;
+    // Convert segment ID to base ID if necessary
+    this.startNodeId = getBaseNodeId(String(startNodeId));
+    console.log(`[NodeMerger] Start node: ${startNodeId} → base ID: ${this.startNodeId}`);
 
     // Operation results
     this.mergedNode = null;
@@ -26,12 +30,51 @@ export class NodeMerger extends Operation {
    * Validate if operation can be executed
    */
   validate() {
-    const startNode = this.graph.getNode(this.startNodeId);
-    if (!startNode) {
-      throw new Error(`Start node ${this.startNodeId} not found`);
+    // Check if base node exists (may be represented by segments)
+    const baseNodes = this.getBaseNodes();
+    const baseNodeExists = baseNodes.some(n => n.id === this.startNodeId);
+
+    if (!baseNodeExists) {
+      throw new Error(`Base node ${this.startNodeId} not found`);
     }
 
     return true;
+  }
+
+  /**
+   * Get all base nodes (consolidate chain segments into single base node entries)
+   * Returns array of base node objects
+   */
+  getBaseNodes() {
+    const allNodes = this.graph.getNodes();
+    const baseNodeMap = new Map();
+
+    allNodes.forEach(node => {
+      const baseId = getBaseNodeId(node.id);
+
+      if (!baseNodeMap.has(baseId)) {
+        // Use first segment (or the node itself) as representative
+        baseNodeMap.set(baseId, {
+          id: baseId,
+          x: node.x,
+          y: node.y,
+          length: node.length,
+          depth: node.depth,
+          seq: node.seq,
+          gfaType: node.gfaType,
+          isChainSegment: node.isChainSegment,
+          parentChainId: node.parentChainId
+        });
+      } else {
+        // If chain, accumulate length
+        const baseNode = baseNodeMap.get(baseId);
+        if (node.isChainSegment) {
+          baseNode.length = (baseNode.length || 0) + (node.length || 0);
+        }
+      }
+    });
+
+    return Array.from(baseNodeMap.values());
   }
 
   /**
@@ -46,28 +89,49 @@ export class NodeMerger extends Operation {
       edges: this.graph.getEdges().map(e => this.cloneObject(e))
     });
 
-    // Find linear chain
-    const startNode = this.graph.getNode(this.startNodeId);
-    const chainNodes = this.findLinearChain(startNode);
+    // Find linear chain of BASE NODES
+    const baseNodes = this.getBaseNodes();
+    const startNode = baseNodes.find(n => n.id === this.startNodeId);
+    const chainBaseNodes = this.findLinearChain(startNode);
 
-    if (chainNodes.length < 2) {
-      throw new Error(`Node ${this.startNodeId} is not part of a linear chain (found ${chainNodes.length} nodes)`);
+    if (chainBaseNodes.length < 2) {
+      throw new Error(`Node ${this.startNodeId} is not part of a linear chain (found ${chainBaseNodes.length} base nodes)`);
     }
 
-    this.originalNodeIds = chainNodes.map(n => n.id);
-    this.originalNodes = chainNodes.map(n => this.cloneObject(n));
+    console.log(`[NodeMerger] Found linear chain of ${chainBaseNodes.length} base nodes:`, chainBaseNodes.map(n => n.id).join(' → '));
+
+    // Expand base nodes to include ALL their segments
+    const allNodesToMerge = [];
+    const allNodes = this.graph.getNodes();
+
+    chainBaseNodes.forEach(baseNode => {
+      const segments = findAllSegments(baseNode.id, allNodes);
+      if (segments.length > 0) {
+        // This is a chain - add all segments
+        allNodesToMerge.push(...segments);
+        console.log(`  Base node ${baseNode.id} → ${segments.length} segments:`, segments.map(s => s.id).join(', '));
+      } else {
+        // Not a chain - add the base node itself
+        allNodesToMerge.push(baseNode);
+      }
+    });
+
+    console.log(`[NodeMerger] Total nodes to merge (including segments): ${allNodesToMerge.length}`);
+
+    this.originalNodeIds = allNodesToMerge.map(n => n.id);
+    this.originalNodes = allNodesToMerge.map(n => this.cloneObject(n));
 
     // Collect internal and external edges BEFORE removing nodes
-    this.collectEdges(chainNodes);
+    this.collectEdges(allNodesToMerge);
 
     console.log(`[NodeMerger] Found ${this.externalEdges.length} external edges to reconnect`);
     this.externalEdges.forEach(({ edge, subnodeType, externalNodeId, pathNodeId, chainEnd }) => {
       console.log(`  - ${chainEnd} of chain (${subnodeType} subnode of ${pathNodeId}) ↔ external node ${externalNodeId}`);
     });
 
-    // Create merged node
-    const pathName = `Linear Chain: ${chainNodes[0].id} → ${chainNodes[chainNodes.length - 1].id}`;
-    this.mergedNode = this.createMergedNode(chainNodes, pathName);
+    // Create merged node (using base nodes for metadata)
+    const pathName = `Linear Chain: ${chainBaseNodes[0].id} → ${chainBaseNodes[chainBaseNodes.length - 1].id}`;
+    this.mergedNode = this.createMergedNode(chainBaseNodes, pathName);
 
     // Re-create external edges connected to merged node
     console.log(`[NodeMerger] Creating ${this.externalEdges.length} external edges`);
@@ -91,7 +155,7 @@ export class NodeMerger extends Operation {
       mergedNodeId: this.mergedNode.id,
       originalNodeIds: this.originalNodeIds,
       externalConnections: this.externalEdges.length,
-      removedNodes: chainNodes.length,
+      removedNodes: allNodesToMerge.length,
       pathName
     };
   }
@@ -163,15 +227,17 @@ export class NodeMerger extends Operation {
   }
 
   /**
-   * Build connection information for all nodes
+   * Build connection information for BASE NODES only
    * For GFA: Uses PHYSICAL connections (red/green subnodes based on orientations)
    * For DOT: Uses LOGICAL connections (source→target)
+   * EXCLUDES internal chain links (links between segments of the same base node)
    */
   buildConnections() {
     const connections = new Map();
 
-    // Initialize all nodes
-    this.graph.getNodes().forEach(node => {
+    // Initialize all BASE nodes
+    const baseNodes = this.getBaseNodes();
+    baseNodes.forEach(node => {
       connections.set(node.id, {
         incoming: [], // Red subnode (incoming) for GFA, or logical incoming
         outgoing: []  // Green subnode (outgoing) for GFA, or logical outgoing
@@ -184,10 +250,19 @@ export class NodeMerger extends Operation {
       edge.srcOrientation !== undefined || edge.tgtOrientation !== undefined
     );
 
-    // Process all edges
+    // Process all edges - but SKIP internal chain links
     edges.forEach(edge => {
+      // Skip internal chain links
+      if (edge.isInternalChainLink) {
+        return;
+      }
+
       const sourceId = edge.source?.id !== undefined ? edge.source.id : edge.source;
       const targetId = edge.target?.id !== undefined ? edge.target.id : edge.target;
+
+      // Convert to base IDs
+      const sourceBaseId = getBaseNodeId(String(sourceId));
+      const targetBaseId = getBaseNodeId(String(targetId));
 
       if (isGFA) {
         // GFA: Use PHYSICAL connections based on orientations
@@ -197,37 +272,39 @@ export class NodeMerger extends Operation {
         const srcOrientation = edge.srcOrientation || '+';
         const tgtOrientation = edge.tgtOrientation || '+';
 
-        // Source node connection
-        if (connections.has(sourceId)) {
+        // Source base node connection
+        if (connections.has(sourceBaseId)) {
           if (srcOrientation === '+') {
             // Source uses green (outgoing) subnode
-            connections.get(sourceId).outgoing.push({ nodeId: targetId, edge });
+            connections.get(sourceBaseId).outgoing.push({ nodeId: targetBaseId, edge });
           } else {
             // Source uses red (incoming) subnode
-            connections.get(sourceId).incoming.push({ nodeId: targetId, edge });
+            connections.get(sourceBaseId).incoming.push({ nodeId: targetBaseId, edge });
           }
         }
 
-        // Target node connection
-        if (connections.has(targetId)) {
+        // Target base node connection
+        if (connections.has(targetBaseId)) {
           if (tgtOrientation === '+') {
             // Target uses red (incoming) subnode
-            connections.get(targetId).incoming.push({ nodeId: sourceId, edge });
+            connections.get(targetBaseId).incoming.push({ nodeId: sourceBaseId, edge });
           } else {
             // Target uses green (outgoing) subnode
-            connections.get(targetId).outgoing.push({ nodeId: sourceId, edge });
+            connections.get(targetBaseId).outgoing.push({ nodeId: sourceBaseId, edge });
           }
         }
       } else {
         // DOT: Use LOGICAL connections (simple source→target)
-        if (connections.has(sourceId)) {
-          connections.get(sourceId).outgoing.push({ nodeId: targetId, edge });
+        if (connections.has(sourceBaseId)) {
+          connections.get(sourceBaseId).outgoing.push({ nodeId: targetBaseId, edge });
         }
-        if (connections.has(targetId)) {
-          connections.get(targetId).incoming.push({ nodeId: sourceId, edge });
+        if (connections.has(targetBaseId)) {
+          connections.get(targetBaseId).incoming.push({ nodeId: sourceBaseId, edge });
         }
       }
     });
+
+    console.log(`[NodeMerger] Built connections for ${connections.size} base nodes (excluding internal chain links)`);
 
     return connections;
   }
@@ -244,7 +321,7 @@ export class NodeMerger extends Operation {
   }
 
   /**
-   * Get previous node in linear chain
+   * Get previous BASE node in linear chain
    * Can traverse backwards even from endpoint nodes (0 outgoing)
    */
   getLinearPrevious(currentNode, connections, visited) {
@@ -276,11 +353,13 @@ export class NodeMerger extends Operation {
       return null;
     }
 
-    return this.graph.getNode(prevNodeId);
+    // Find the base node from our base nodes list
+    const baseNodes = this.getBaseNodes();
+    return baseNodes.find(n => n.id === prevNodeId) || null;
   }
 
   /**
-   * Get next node in linear chain
+   * Get next BASE node in linear chain
    * Can traverse forwards even from endpoint nodes (0 incoming)
    */
   getLinearNext(currentNode, connections, visited) {
@@ -312,7 +391,9 @@ export class NodeMerger extends Operation {
       return null;
     }
 
-    return this.graph.getNode(nextNodeId);
+    // Find the base node from our base nodes list
+    const baseNodes = this.getBaseNodes();
+    return baseNodes.find(n => n.id === nextNodeId) || null;
   }
 
   /**
