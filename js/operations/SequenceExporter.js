@@ -1,10 +1,13 @@
 // sequence-exporter.js - ENHANCED: Intelligent starting orientation based on GFA links
 
+import { getBaseNodeId, buildChainAwareNodeMap } from '../utils/chain-utils.js';
+
 /**
  * Enhanced GFA sequence reconstruction that:
  * 1. Uses actual GFA link between first two nodes to determine starting orientations
  * 2. Supports both direct and bidirectional link analysis
  * 3. Provides comprehensive diagnostics for all orientation decisions
+ * 4. Handles chain-segmented nodes
  */
 
 // ===== UTILITY FUNCTIONS =====
@@ -76,9 +79,10 @@ function transformCigarForReverse(cigarString) {
   return operations.join('');
 }
 
-// Normalize node ID (handle negative node IDs properly)
+// Normalize node ID (handle negative node IDs and extract base ID from chain segments)
 function normalizeNodeId(nodeId) {
-  return String(nodeId).trim();
+  const normalized = String(nodeId).trim();
+  return getBaseNodeId(normalized);
 }
 
 // Get the opposite orientation
@@ -1305,9 +1309,9 @@ export function exportPathSequence(pathData, nodes, links) {
   console.log(`📊 Available nodes: ${nodes.length}`);
   console.log(`🔗 Available links: ${links.length}`);
   
-  // Parse path and get node objects
+  // Parse path and get node objects using chain-aware lookup
   const nodeIds = pathData.sequence.split(',').map(id => id.trim());
-  const nodeMap = new Map(nodes.map(n => [normalizeNodeId(n.id), n]));
+  const nodeMap = buildChainAwareNodeMap(nodes);
   const pathNodes = nodeIds.map(id => nodeMap.get(normalizeNodeId(id))).filter(Boolean);
   
   if (pathNodes.length === 0) {
