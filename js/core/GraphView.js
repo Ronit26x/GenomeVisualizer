@@ -117,44 +117,77 @@ export class GraphView extends EventEmitter {
    * Calculate bounding boxes for connected components
    */
   _calculateComponentBounds() {
-    // Build adjacency information
+    // For GFA format, we need the visual nodes to be created first
+    // Skip calculation if GFA renderer hasn't created visual nodes yet
+    if (this._format === 'gfa' && this._gfaRenderer.gfaVisualNodes.length === 0) {
+      return [];
+    }
+
+    // Helper to extract base node ID (remove _segN suffix for chain segments)
+    const getBaseNodeId = (nodeId) => {
+      const id = String(nodeId);
+      const match = id.match(/^(.+)_seg\d+$/);
+      return match ? match[1] : id;
+    };
+
+    // Build adjacency information using BASE node IDs (ignore chain segments)
     const visited = new Set();
     const components = [];
 
-    // Helper function to perform DFS
-    const dfs = (nodeId, component) => {
-      if (visited.has(nodeId)) return;
-      visited.add(nodeId);
-      component.push(nodeId);
+    // Helper function to perform DFS on base node IDs
+    const dfs = (baseNodeId, component) => {
+      if (visited.has(baseNodeId)) return;
+      visited.add(baseNodeId);
+      component.push(baseNodeId);
 
-      // Find all connected nodes
+      // Find all connected nodes (using base IDs)
       this._links.forEach(link => {
         const sourceId = String(link.source?.id || link.source);
         const targetId = String(link.target?.id || link.target);
+        const sourceBaseId = getBaseNodeId(sourceId);
+        const targetBaseId = getBaseNodeId(targetId);
 
-        if (sourceId === String(nodeId) && !visited.has(targetId)) {
-          dfs(targetId, component);
-        } else if (targetId === String(nodeId) && !visited.has(sourceId)) {
-          dfs(sourceId, component);
+        // Skip internal chain links (links within the same base node)
+        if (sourceBaseId === targetBaseId) return;
+
+        if (sourceBaseId === baseNodeId && !visited.has(targetBaseId)) {
+          dfs(targetBaseId, component);
+        } else if (targetBaseId === baseNodeId && !visited.has(sourceBaseId)) {
+          dfs(sourceBaseId, component);
         }
       });
     };
 
-    // Find all connected components
+    // Get unique base node IDs
+    const baseNodeIds = new Set();
     this._nodes.forEach(node => {
-      if (!visited.has(node.id)) {
+      baseNodeIds.add(getBaseNodeId(node.id));
+    });
+
+    // Find all connected components (using base node IDs)
+    baseNodeIds.forEach(baseNodeId => {
+      if (!visited.has(baseNodeId)) {
         const component = [];
-        dfs(node.id, component);
+        dfs(baseNodeId, component);
         components.push(component);
       }
     });
 
     // Calculate bounding boxes for each component with padding
     const bounds = [];
-    components.forEach(componentNodeIds => {
-      const nodes = componentNodeIds.map(id =>
-        this._nodes.find(n => n.id === id)
-      ).filter(n => n && n.x !== undefined && n.y !== undefined);
+    components.forEach(componentBaseNodeIds => {
+      // Map base node IDs to all actual nodes (including all segments)
+      const nodes = [];
+      componentBaseNodeIds.forEach(baseNodeId => {
+        // Find all nodes (segments) that belong to this base node
+        this._nodes.forEach(node => {
+          if (getBaseNodeId(node.id) === baseNodeId) {
+            if (node.x !== undefined && node.y !== undefined) {
+              nodes.push(node);
+            }
+          }
+        });
+      });
 
       if (nodes.length === 0) return;
 
