@@ -14,6 +14,7 @@ import { VertexResolution } from './operations/VertexResolution.js';
 import { PhysicalVertexResolution } from './operations/PhysicalVertexResolution.js';
 import { exportMergedNodeSequence, isMergedNode, getMergedNodeInfo, updatePathsAfterMerge } from './operations/node-merger-utils.js';
 import { exportGraphToGfa } from './utils/exporters/GfaExporter.js';
+import { buildChainAwareNodeMap, getBaseNodeId, findAllSegments } from './utils/chain-utils.js';
 
 // ===== MVC SYSTEM INITIALIZATION =====
 
@@ -462,8 +463,8 @@ function highlightPaths(sequence, pathName = null) {
   // Parse the sequence
   const nodeIds = sequence.split(',').map(id => id.trim());
 
-  // Validate nodes exist
-  const nodeMap = new Map(model.nodes.map(n => [String(n.id), n]));
+  // Build chain-aware node map that supports both base IDs and segment IDs
+  const nodeMap = buildChainAwareNodeMap(model.nodes);
   const validNodes = nodeIds.filter(id => nodeMap.has(id));
 
   if (validNodes.length === 0) {
@@ -471,22 +472,42 @@ function highlightPaths(sequence, pathName = null) {
     return;
   }
 
-  // Create new path object
-  const pathNodes = new Set(validNodes);
+  // Expand base node IDs to include all their segments
+  const pathNodes = new Set();
+  validNodes.forEach(nodeId => {
+    const baseId = getBaseNodeId(nodeId);
+    const segments = findAllSegments(baseId, model.nodes);
+
+    if (segments.length > 0) {
+      // Add all segments for this base node
+      segments.forEach(seg => pathNodes.add(seg.id));
+    } else {
+      // Not a chain, just add the node itself
+      pathNodes.add(nodeId);
+    }
+  });
+
   const pathEdges = new Set();
 
   // Find edges between consecutive nodes
+  // For chains, we need to check if edges connect any segments of source to any segments of target
   for (let i = 0; i < validNodes.length - 1; i++) {
-    const sourceId = validNodes[i];
-    const targetId = validNodes[i + 1];
+    const sourceBaseId = getBaseNodeId(validNodes[i]);
+    const targetBaseId = getBaseNodeId(validNodes[i + 1]);
 
     model.links.forEach((link, index) => {
       const linkSourceId = String(link.source.id || link.source);
       const linkTargetId = String(link.target.id || link.target);
+      const linkSourceBaseId = getBaseNodeId(linkSourceId);
+      const linkTargetBaseId = getBaseNodeId(linkTargetId);
 
-      if ((linkSourceId === sourceId && linkTargetId === targetId) ||
-          (linkSourceId === targetId && linkTargetId === sourceId)) {
-        pathEdges.add(index);
+      // Check if this link connects source base node to target base node (in either direction)
+      if ((linkSourceBaseId === sourceBaseId && linkTargetBaseId === targetBaseId) ||
+          (linkSourceBaseId === targetBaseId && linkTargetBaseId === sourceBaseId)) {
+        // Don't include internal chain links
+        if (!link.isInternalChainLink) {
+          pathEdges.add(index);
+        }
       }
     });
   }
@@ -548,7 +569,8 @@ function setupPathManagement() {
 
     // Parse and validate
     const nodeIds = sequence.split(',').map(id => id.trim());
-    const nodeMap = new Map(model.nodes.map(n => [String(n.id), n]));
+    // Build chain-aware node map that supports both base IDs and segment IDs
+    const nodeMap = buildChainAwareNodeMap(model.nodes);
     const validNodes = nodeIds.filter(id => nodeMap.has(id));
 
     if (validNodes.length === 0) {
@@ -556,21 +578,42 @@ function setupPathManagement() {
       return;
     }
 
-    // Temporarily highlight (don't save)
-    const pathNodes = new Set(validNodes);
+    // Expand base node IDs to include all their segments
+    const pathNodes = new Set();
+    validNodes.forEach(nodeId => {
+      const baseId = getBaseNodeId(nodeId);
+      const segments = findAllSegments(baseId, model.nodes);
+
+      if (segments.length > 0) {
+        // Add all segments for this base node
+        segments.forEach(seg => pathNodes.add(seg.id));
+      } else {
+        // Not a chain, just add the node itself
+        pathNodes.add(nodeId);
+      }
+    });
+
     const pathEdges = new Set();
 
+    // Find edges between consecutive nodes
+    // For chains, we need to check if edges connect any segments of source to any segments of target
     for (let i = 0; i < validNodes.length - 1; i++) {
-      const sourceId = validNodes[i];
-      const targetId = validNodes[i + 1];
+      const sourceBaseId = getBaseNodeId(validNodes[i]);
+      const targetBaseId = getBaseNodeId(validNodes[i + 1]);
 
       model.links.forEach((link, index) => {
         const linkSourceId = String(link.source.id || link.source);
         const linkTargetId = String(link.target.id || link.target);
+        const linkSourceBaseId = getBaseNodeId(linkSourceId);
+        const linkTargetBaseId = getBaseNodeId(linkTargetId);
 
-        if ((linkSourceId === sourceId && linkTargetId === targetId) ||
-            (linkSourceId === targetId && linkTargetId === sourceId)) {
-          pathEdges.add(index);
+        // Check if this link connects source base node to target base node (in either direction)
+        if ((linkSourceBaseId === sourceBaseId && linkTargetBaseId === targetBaseId) ||
+            (linkSourceBaseId === targetBaseId && linkTargetBaseId === sourceBaseId)) {
+          // Don't include internal chain links
+          if (!link.isInternalChainLink) {
+            pathEdges.add(index);
+          }
         }
       });
     }
@@ -813,7 +856,7 @@ function setupPathImportExport() {
             textContent,
             model.nodes,
             model.savedPaths,
-            (sequence, pathName) => controller.savePath(sequence, pathName)
+            highlightPaths  // Use highlightPaths which has chain-aware node lookup
           );
 
           showImportResultsDialog(results);

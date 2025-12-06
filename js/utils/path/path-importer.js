@@ -1,5 +1,7 @@
 // path-importer.js - Bulk path import from text files
 
+import { buildChainAwareNodeMap } from '../chain-utils.js';
+
 /**
  * Parse a line from the path file
  * Format: "node1, node2, node3 /PathName" or "node1, node2, node3 / Path Name"
@@ -93,18 +95,20 @@ function generateUniqueName(baseName, existingNames) {
  */
 export function importPathsFromText(textContent, nodes, savedPaths, highlightPathsFunction) {
   const lines = textContent.split(/\r?\n/);
-  const nodeMap = new Map(nodes.map(n => [String(n.id), n]));
+
+  // Build chain-aware node map that supports both base IDs and segment IDs
+  const nodeMap = buildChainAwareNodeMap(nodes);
   const existingNames = new Set(savedPaths.map(p => p.name));
-  
+
   const results = {
     successful: [],
     failed: [],
     skipped: []
   };
-  
+
   console.log('=== PATH IMPORT STARTED ===');
   console.log(`Processing ${lines.length} lines`);
-  console.log(`Available nodes: ${nodeMap.size}`);
+  console.log(`Available nodes (chain-aware): ${nodeMap.size}`);
   console.log(`Existing paths: ${existingNames.size}`);
   
   lines.forEach((line, lineNumber) => {
