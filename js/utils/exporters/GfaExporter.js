@@ -1,8 +1,10 @@
 // GfaExporter.js - Export graph to GFA format with merge/resolution support
 
+import { getBaseNodeId, findAllSegments } from '../chain-utils.js';
+
 /**
  * GfaExporter exports the current graph state to GFA format.
- * Handles merged nodes and resolved vertices by reconstructing the original structure.
+ * Handles merged nodes, resolved vertices, and chain segments by reconstructing the original structure.
  */
 export class GfaExporter {
   constructor() {
@@ -30,9 +32,15 @@ export class GfaExporter {
       gfaText += `H\tVN:Z:${this.version}\n`;
     }
 
+    // FIRST: Consolidate chain segments back to base nodes
+    const { consolidatedNodes, consolidatedLinks } = this.consolidateChainSegments(nodes, links);
+
+    console.log(`[GfaExporter] Consolidated ${nodes.length} nodes (with segments) to ${consolidatedNodes.length} base nodes`);
+    console.log(`[GfaExporter] Consolidated ${links.length} links to ${consolidatedLinks.length} links`);
+
     // Process nodes - expand merged nodes if requested
-    const processedNodes = this.processNodes(nodes, expandMergedNodes);
-    const processedLinks = this.processLinks(nodes, links, expandMergedNodes);
+    const processedNodes = this.processNodes(consolidatedNodes, expandMergedNodes);
+    const processedLinks = this.processLinks(consolidatedNodes, consolidatedLinks, expandMergedNodes);
 
     // Add segments
     processedNodes.forEach(node => {
@@ -45,6 +53,116 @@ export class GfaExporter {
     });
 
     return gfaText;
+  }
+
+  /**
+   * Consolidate chain segments back to their base nodes
+   * @param {Array} nodes - Nodes (may include chain segments)
+   * @param {Array} links - Links (may include internal chain links)
+   * @returns {Object} { consolidatedNodes, consolidatedLinks }
+   */
+  consolidateChainSegments(nodes, links) {
+    // Group nodes by base ID
+    const baseNodeGroups = new Map();
+
+    nodes.forEach(node => {
+      const baseId = getBaseNodeId(node.id);
+
+      if (!baseNodeGroups.has(baseId)) {
+        baseNodeGroups.set(baseId, {
+          baseId: baseId,
+          segments: [],
+          isChain: false
+        });
+      }
+
+      const group = baseNodeGroups.get(baseId);
+      group.segments.push(node);
+
+      // If this is a segment (not the base node), mark as chain
+      if (node.isChainSegment || node.parentChainId) {
+        group.isChain = true;
+      }
+    });
+
+    // Consolidate segments into base nodes
+    const consolidatedNodes = [];
+
+    baseNodeGroups.forEach((group, baseId) => {
+      if (group.isChain && group.segments.length > 1) {
+        // This is a chain - consolidate all segments into one node
+        // Use first segment as template and sum up properties
+        const firstSegment = group.segments[0];
+        const totalLength = group.segments.reduce((sum, seg) => sum + (seg.length || 0), 0);
+
+        const consolidatedNode = {
+          id: baseId,
+          seq: firstSegment.seq || '*',
+          length: totalLength,
+          depth: firstSegment.depth,
+          gfaType: firstSegment.gfaType,
+          LN: totalLength,
+          DP: firstSegment.DP || firstSegment.depth,
+          KC: firstSegment.KC,
+          RC: firstSegment.RC,
+          // Preserve other properties from first segment
+          ...firstSegment,
+          // Override with consolidated values
+          id: baseId,
+          length: totalLength,
+          LN: totalLength
+        };
+
+        consolidatedNodes.push(consolidatedNode);
+      } else {
+        // Not a chain or single segment - use as is
+        consolidatedNodes.push(group.segments[0]);
+      }
+    });
+
+    // Consolidate links - remove internal chain links and redirect segment IDs to base IDs
+    const linkSet = new Set();
+    const consolidatedLinks = [];
+
+    links.forEach(link => {
+      // Skip internal chain links
+      if (link.isInternalChainLink) {
+        return;
+      }
+
+      const sourceId = String(link.source?.id || link.source);
+      const targetId = String(link.target?.id || link.target);
+
+      const sourceBaseId = getBaseNodeId(sourceId);
+      const targetBaseId = getBaseNodeId(targetId);
+
+      // Create link key for deduplication
+      const srcOri = link.srcOrientation || '+';
+      const tgtOri = link.tgtOrientation || '+';
+      const linkKey = `${sourceBaseId}\t${srcOri}\t${targetBaseId}\t${tgtOri}`;
+
+      // Skip if we've already added this link
+      if (linkSet.has(linkKey)) {
+        return;
+      }
+
+      linkSet.add(linkKey);
+
+      // Create consolidated link with base IDs
+      consolidatedLinks.push({
+        source: sourceBaseId,
+        target: targetBaseId,
+        srcOrientation: srcOri,
+        tgtOrientation: tgtOri,
+        overlap: link.overlap || '*',
+        gfaType: link.gfaType || 'link'
+      });
+    });
+
+    return {
+      consolidatedNodes,
+      consolidatedLinks
+    };
   }
 
   /**
