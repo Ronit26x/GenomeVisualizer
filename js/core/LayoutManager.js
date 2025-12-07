@@ -143,8 +143,17 @@ export class LayoutManager extends EventEmitter {
       .force('link', d3.forceLink(links)
         .id(d => d.id)
         .distance(link => {
-          // Internal chain links: very short distance (tight chains)
-          if (link.isInternalChainLink) return 10;
+          // Internal chain links: distance based on segment length
+          if (link.isInternalChainLink) {
+            const sourceNode = typeof link.source === 'object' ? link.source : nodes.find(n => n.id === link.source);
+            if (sourceNode && sourceNode.length) {
+              // Reduced scaling for more subtle length variation
+              // 0.0015 pixels per bp = 1500 pixels per megabase
+              const scaleFactor = 0.0015;
+              return Math.max(5, sourceNode.length * scaleFactor);
+            }
+            return 10;
+          }
           // External links: much shorter distance for compact layout
           return 20;
         })
@@ -217,8 +226,17 @@ export class LayoutManager extends EventEmitter {
       .force('link', d3.forceLink(links)
         .id(d => d.id)
         .distance(link => {
-          // Internal chain links: very short distance (tight chains)
-          if (link.isInternalChainLink) return 10;
+          // Internal chain links: distance based on segment length
+          if (link.isInternalChainLink) {
+            const sourceNode = typeof link.source === 'object' ? link.source : nodes.find(n => n.id === link.source);
+            if (sourceNode && sourceNode.length) {
+              // Reduced scaling for more subtle length variation
+              // 0.0015 pixels per bp = 1500 pixels per megabase
+              const scaleFactor = 0.0015;
+              return Math.max(5, sourceNode.length * scaleFactor);
+            }
+            return 10;
+          }
           // External links: much shorter distance for compact layout
           return 20;
         })
