@@ -163,6 +163,7 @@ export class LayoutManager extends EventEmitter {
           // External links: normal strength
           return 1.0;
         }))
+      .force('anisotropicCollision', this._createAnisotropicCollisionForce(nodes))
       .force('center', d3.forceCenter(canvasWidth / 2, canvasHeight / 2))
       .on('tick', () => this._onTick())
       .on('end', () => this._onEnd());
@@ -246,6 +247,7 @@ export class LayoutManager extends EventEmitter {
           // External links: normal strength
           return 1.0;
         }))
+      .force('anisotropicCollision', this._createAnisotropicCollisionForce(nodes))
       .force('center', d3.forceCenter(centerX, centerY))
       .on('tick', () => this._onTick())
       .on('end', () => this._onEnd());
@@ -330,6 +332,137 @@ export class LayoutManager extends EventEmitter {
     if (updates.length > 0) {
       this.model.updateNodePositions(updates, this.layoutSourceTag);
     }
+  }
+
+  // ===== CUSTOM FORCES =====
+
+  /**
+   * Create anisotropic collision force for chain segments
+   * Uses elongated collision shape - narrow along node direction, wider perpendicular
+   * This prevents parallel nodes from overlapping while allowing end-to-end closeness
+   */
+  _createAnisotropicCollisionForce(nodes) {
+    const strength = 2.5;
+    const iterations = 2;
+    let tickCount = 0;
+
+    function force(alpha) {
+      const links = this.model._links;
+      let collisionCount = 0;
+
+      // For each chain segment, calculate its orientation
+      const nodeAngles = new Map();
+      nodes.forEach(node => {
+        if (node.isChainSegment) {
+          // Calculate angle from connected internal chain links
+          const chainLinks = links.filter(link => {
+            const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+            const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+            return link.isInternalChainLink && (sourceId === node.id || targetId === node.id);
+          });
+
+          if (chainLinks.length > 0) {
+            // Get angle from first chain link
+            const link = chainLinks[0];
+            const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+            const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+
+            const otherNodeId = sourceId === node.id ? targetId : sourceId;
+            const otherNode = nodes.find(n => n.id === otherNodeId);
+
+            if (otherNode) {
+              const dx = otherNode.x - node.x;
+              const dy = otherNode.y - node.y;
+              const angle = Math.atan2(dy, dx);
+              nodeAngles.set(node.id, angle);
+            }
+          }
+        }
+      });
+
+      // Apply anisotropic collision between chain segments
+      for (let k = 0; k < iterations; k++) {
+        for (let i = 0; i < nodes.length; i++) {
+          const nodeA = nodes[i];
+          if (!nodeA.isChainSegment) continue;
+
+          const angleA = nodeAngles.get(nodeA.id);
+          if (angleA === undefined) continue;
+
+          for (let j = i + 1; j < nodes.length; j++) {
+            const nodeB = nodes[j];
+            if (!nodeB.isChainSegment) continue;
+
+            const angleB = nodeAngles.get(nodeB.id);
+            if (angleB === undefined) continue;
+
+            // Calculate distance between nodes
+            const dx = nodeB.x - nodeA.x;
+            const dy = nodeB.y - nodeA.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < 0.001) continue; // Skip if too close
+
+            // Calculate angle from A to B
+            const angleAtoB = Math.atan2(dy, dx);
+
+            // Calculate how perpendicular this is to both node orientations
+            // If nodes are parallel and side-by-side, we want strong repulsion
+            // If nodes are end-to-end, we want weak repulsion
+
+            // Angle difference from A's orientation
+            let diffA = Math.abs(angleAtoB - angleA);
+            while (diffA > Math.PI) diffA = Math.abs(diffA - 2 * Math.PI);
+
+            // How perpendicular is this connection to node A? (0 = aligned, PI/2 = perpendicular)
+            const perpA = Math.min(diffA, Math.PI - diffA);
+
+            // Angle difference from B's orientation
+            let diffB = Math.abs(angleAtoB - angleB);
+            while (diffB > Math.PI) diffB = Math.abs(diffB - 2 * Math.PI);
+
+            const perpB = Math.min(diffB, Math.PI - diffB);
+
+            // Average perpendicularity (higher = more side-by-side)
+            const perp = (perpA + perpB) / 2;
+
+            // Elongated collision shape:
+            // - Along node direction: small radius (5px)
+            // - Perpendicular: large radius (30px)
+            const minRadius = 5;
+            const maxRadius = 30;
+
+            // Interpolate based on perpendicularity
+            const effectiveRadius = minRadius + (maxRadius - minRadius) * (perp / (Math.PI / 2));
+
+            // Apply repulsion if too close
+            if (dist < effectiveRadius) {
+              collisionCount++;
+              const repulsion = (effectiveRadius - dist) / dist * strength * alpha;
+              const fx = dx * repulsion;
+              const fy = dy * repulsion;
+
+              nodeB.vx += fx;
+              nodeB.vy += fy;
+              nodeA.vx -= fx;
+              nodeA.vy -= fy;
+            }
+          }
+        }
+      }
+
+      // Log every 60 ticks to verify force is running
+      tickCount++;
+      if (tickCount % 60 === 0 && collisionCount > 0) {
+        console.log(`[AnisotropicCollision] Tick ${tickCount}: ${collisionCount} collisions resolved, alpha=${alpha.toFixed(3)}`);
+      }
+    }
+
+    force.initialize = (_nodes) => {
+      nodes = _nodes;
+    };
+
+    return force.bind(this);
   }
 
   // ===== ALIGNMENT FORCES =====
