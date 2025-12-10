@@ -579,21 +579,33 @@ export class GraphModel extends EventEmitter {
       // Mark original node for removal
       nodesToRemove.push(originalNode.id);
 
-      // Redirect external edges to chain endpoints
+      // Redirect external edges to chain endpoints (GFA-aware)
       this._links.forEach(link => {
         const sourceId = String(link.source?.id || link.source);
         const targetId = String(link.target?.id || link.target);
 
-        // If edge connects to this node, redirect to appropriate segment
+        // If edge connects to this node, redirect to appropriate segment based on GFA orientation
         if (sourceId === originalNode.id) {
-          // Outgoing edge → connect from last segment
-          link.source = segments[segments.length - 1].id;
-          console.log(`  Redirected outgoing edge: ${originalNode.id} → ${link.source}`);
+          // Source node: check srcOrientation
+          // '+' orientation → green (outgoing) end → LAST segment
+          // '-' orientation → red (incoming) end → FIRST segment
+          const srcOri = link.srcOrientation || '+';
+          const newSegmentId = srcOri === '+'
+            ? segments[segments.length - 1].id  // Last segment (green/outgoing)
+            : segments[0].id;                    // First segment (red/incoming)
+          link.source = newSegmentId;
+          console.log(`  Redirected source edge: ${originalNode.id}[${srcOri}] → ${newSegmentId}`);
         }
         if (targetId === originalNode.id) {
-          // Incoming edge → connect to first segment
-          link.target = segments[0].id;
-          console.log(`  Redirected incoming edge: ${originalNode.id} → ${link.target}`);
+          // Target node: check tgtOrientation
+          // '+' orientation → red (incoming) end → FIRST segment
+          // '-' orientation → green (outgoing) end → LAST segment
+          const tgtOri = link.tgtOrientation || '+';
+          const newSegmentId = tgtOri === '+'
+            ? segments[0].id                    // First segment (red/incoming)
+            : segments[segments.length - 1].id; // Last segment (green/outgoing)
+          link.target = newSegmentId;
+          console.log(`  Redirected target edge: ${originalNode.id}[${tgtOri}] → ${newSegmentId}`);
         }
       });
     });
