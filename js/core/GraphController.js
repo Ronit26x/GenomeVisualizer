@@ -373,6 +373,25 @@ export class GraphController extends EventEmitter {
       this.view.canvas.width,
       this.view.canvas.height
     );
+
+    // Automatically trigger warm start by simulating a node drag internally
+    // Wait 1 second, drag for 1ms, then trigger warm start
+    if (this.model.nodes.length > 0) {
+      setTimeout(() => {
+        const firstNode = this.model.nodes[0];
+        const firstNodeId = firstNode.id;
+
+        // Start drag
+        this._onNodeDragStart(firstNodeId, firstNode.x, firstNode.y);
+
+        // End drag after 1ms and trigger warm start
+        setTimeout(() => {
+          this._onNodeDragEnd(firstNodeId);
+          // Trigger warm start after drag
+          this._onNodeClick(firstNodeId);
+        }, 1);
+      }, 1000);
+    }
   }
 
   /**
