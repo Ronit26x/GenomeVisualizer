@@ -166,6 +166,11 @@ export class GraphController extends EventEmitter {
     if (this._firstNodeClickAfterLoad && this.layoutManager.simulation) {
       console.log('[GraphController] First click - starting warm start (4000 ticks)');
 
+      // Update loading screen
+      if (window.LoadingScreen) {
+        window.LoadingScreen.update('Settling graph layout...', 75, 'Computing optimal positions');
+      }
+
       const sim = this.layoutManager.simulation;
 
       // Run ticks in batches using requestAnimationFrame for smooth UI
@@ -180,6 +185,13 @@ export class GraphController extends EventEmitter {
           tickCount++;
         }
 
+        // Update loading screen progress during settling
+        if (window.LoadingScreen && tickCount % 200 === 0) {
+          const progress = 75 + Math.floor((tickCount / totalTicks) * 15); // 75-90%
+          window.LoadingScreen.update('Settling graph layout...', progress,
+            `${Math.floor((tickCount / totalTicks) * 100)}% complete`);
+        }
+
         // Continue if more ticks needed
         if (tickCount < totalTicks) {
           requestAnimationFrame(runTickBatch);
@@ -188,6 +200,11 @@ export class GraphController extends EventEmitter {
           sim.alpha(0.3).alphaDecay(0.1).restart();
           console.log('[GraphController] Warm start complete');
 
+          // Update loading screen
+          if (window.LoadingScreen) {
+            window.LoadingScreen.update('Applying rotational alignment...', 90, 'Optimizing node orientations');
+          }
+
           // Apply rotational alignment to GFA nodes for cleaner layout
           console.log('[GraphController] Applying rotational alignment for cleaner layout');
           this.layoutManager.applyRotationalAlignment();
@@ -195,6 +212,12 @@ export class GraphController extends EventEmitter {
           // Split long nodes into chains for natural curving (GFA only)
           if (this.model.format === 'gfa') {
             console.log('[GraphController] Splitting long nodes into chains for natural curving');
+
+            // Update loading screen for segmentation
+            if (window.LoadingScreen) {
+              window.LoadingScreen.update('Segmenting long nodes...', 95, 'Creating chain segments for smooth curves');
+            }
+
             this.model.splitLongNodesIntoChains(50000, 5, 'system');
 
             // Restart simulation with the new chain structure
@@ -206,9 +229,20 @@ export class GraphController extends EventEmitter {
             );
           }
 
-          // Auto-stop simulation 4 seconds after warm start
-          console.log('[GraphController] Scheduling auto-stop in 4 seconds');
-          this._scheduleAutoStop(4000);
+          // Perform final redraw to settle the layout
+          console.log('[GraphController] Performing final redraw for optimal settling');
+
+          if (window.LoadingScreen) {
+            window.LoadingScreen.update('Final settling...', 96, 'Optimizing final layout');
+          }
+
+          // Restart the simulation for final settling
+          if (this.layoutManager.simulation) {
+            this.layoutManager.simulation.alpha(0.5).restart();
+          }
+
+          // Monitor simulation settling and zoom when done
+          this._monitorFinalSettling();
         }
       };
 
@@ -351,6 +385,74 @@ export class GraphController extends EventEmitter {
     }, delay);
   }
 
+  /**
+   * Monitor final settling after redraw and zoom when complete
+   */
+  _monitorFinalSettling() {
+    if (!this.layoutManager.simulation) return;
+
+    let checkCount = 0;
+    const maxChecks = 100; // Maximum 10 seconds (100 * 100ms)
+    const checkInterval = 100; // Check every 100ms
+
+    const checkSettling = () => {
+      if (!this.layoutManager.simulation) {
+        // Simulation stopped, proceed to finalize
+        this._finalizeGraphDisplay();
+        return;
+      }
+
+      const alpha = this.layoutManager.simulation.alpha();
+      checkCount++;
+
+      // Update progress (96-99% during settling)
+      const progress = 96 + Math.min(3, Math.floor((checkCount / maxChecks) * 3));
+      if (window.LoadingScreen && checkCount % 5 === 0) {
+        window.LoadingScreen.update('Final settling...', progress, `Settling... (alpha: ${alpha.toFixed(3)})`);
+      }
+
+      // Check if settled (alpha very low) or timeout
+      if (alpha < 0.01 || checkCount >= maxChecks) {
+        console.log(`[GraphController] Final settling complete - alpha: ${alpha.toFixed(3)}, checks: ${checkCount}`);
+
+        // Stop the simulation
+        this.layoutManager.simulation.stop();
+        this.layoutManager.isRunning = false;
+
+        // Proceed to finalize
+        this._finalizeGraphDisplay();
+      } else {
+        // Continue monitoring
+        setTimeout(checkSettling, checkInterval);
+      }
+    };
+
+    // Start monitoring
+    setTimeout(checkSettling, checkInterval);
+  }
+
+  /**
+   * Finalize graph display - zoom to fit and hide loading screen
+   */
+  _finalizeGraphDisplay() {
+    console.log('[GraphController] Finalizing graph display');
+
+    if (window.LoadingScreen) {
+      window.LoadingScreen.update('Finalizing...', 100, 'Graph ready!');
+    }
+
+    // Zoom to fit all nodes in view - use larger padding for more zoom out
+    console.log('[GraphController] Zooming to fit all nodes');
+    this.view.zoomToFit(150); // Increased padding for more zoom out
+
+    // Hide loading screen after zoom completes
+    setTimeout(() => {
+      if (window.LoadingScreen) {
+        window.LoadingScreen.hide();
+      }
+    }, 1000); // Wait for zoom animation to complete (750ms + margin)
+  }
+
   // ===== PUBLIC API (called by UI/main.js) =====
 
   /**
@@ -373,6 +475,11 @@ export class GraphController extends EventEmitter {
       this.view.canvas.width,
       this.view.canvas.height
     );
+
+    // Update loading screen
+    if (window.LoadingScreen) {
+      window.LoadingScreen.update('Starting simulation...', 70, 'Warming up layout engine');
+    }
 
     // Automatically trigger warm start by simulating a node drag internally
     // Wait 1 second, drag for 1ms, then trigger warm start

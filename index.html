@@ -46,12 +46,25 @@
   <script type="module" src="js/main.js"></script>
 </head>
 <body>
+  <!-- Loading Screen Overlay -->
+  <div id="loadingScreen" style="display: none;">
+    <div class="loading-content">
+      <div class="loading-spinner"></div>
+      <h2 class="loading-title">Loading Graph</h2>
+      <p class="loading-message" id="loadingMessage">Initializing...</p>
+      <div class="loading-progress">
+        <div class="loading-progress-bar" id="loadingProgressBar"></div>
+      </div>
+      <p class="loading-subtitle" id="loadingSubtitle"></p>
+    </div>
+  </div>
+
   <div id="app">
     <div id="menu">
       <h3>Menu</h3>
       <input type="file" id="fileInput" accept=".dot,.gfa" />
       <button id="genRandom">Generate Random Graph</button>
-      <button id="resetView">Return to Default View</button>
+      <button id="resetView">Zoom to Fit</button>
       <button id="pinNode">Pin Selected Node</button>
       <button id="flipNode" style="display: none;">Flip Selected Node ↻</button>
       

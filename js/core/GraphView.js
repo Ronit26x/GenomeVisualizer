@@ -524,6 +524,97 @@ export class GraphView extends EventEmitter {
   }
 
   /**
+   * Zoom to fit all nodes in view
+   */
+  zoomToFit(padding = 50) {
+    if (this._nodes.length === 0) return;
+
+    // Calculate bounding box of all nodes
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    this._nodes.forEach(node => {
+      if (node.x !== undefined && node.y !== undefined) {
+        // For GFA format, consider node dimensions
+        if (this._format === 'gfa') {
+          const gfaNode = this._gfaRenderer.gfaVisualNodes.find(gn => gn.id === node.id);
+          if (gfaNode) {
+            const halfLength = gfaNode.drawnLength / 2;
+            const halfWidth = gfaNode.width / 2;
+            const cos = Math.cos(gfaNode.angle);
+            const sin = Math.sin(gfaNode.angle);
+
+            // Calculate the 4 corners
+            const corners = [
+              { x: gfaNode.x - cos * halfLength - sin * halfWidth, y: gfaNode.y - sin * halfLength + cos * halfWidth },
+              { x: gfaNode.x - cos * halfLength + sin * halfWidth, y: gfaNode.y - sin * halfLength - cos * halfWidth },
+              { x: gfaNode.x + cos * halfLength - sin * halfWidth, y: gfaNode.y + sin * halfLength + cos * halfWidth },
+              { x: gfaNode.x + cos * halfLength + sin * halfWidth, y: gfaNode.y + sin * halfLength - cos * halfWidth }
+            ];
+
+            corners.forEach(corner => {
+              minX = Math.min(minX, corner.x);
+              minY = Math.min(minY, corner.y);
+              maxX = Math.max(maxX, corner.x);
+              maxY = Math.max(maxY, corner.y);
+            });
+          } else {
+            // Fallback if GFA node not created yet
+            minX = Math.min(minX, node.x);
+            minY = Math.min(minY, node.y);
+            maxX = Math.max(maxX, node.x);
+            maxY = Math.max(maxY, node.y);
+          }
+        } else {
+          // For DOT format, use node position with small radius
+          const radius = 10;
+          minX = Math.min(minX, node.x - radius);
+          minY = Math.min(minY, node.y - radius);
+          maxX = Math.max(maxX, node.x + radius);
+          maxY = Math.max(maxY, node.y + radius);
+        }
+      }
+    });
+
+    if (!isFinite(minX)) return;
+
+    // Add generous padding to ensure graph is zoomed out
+    const width = maxX - minX + 2 * padding;
+    const height = maxY - minY + 2 * padding;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    // Calculate scale to fit - with extra margin to zoom out more
+    const scaleX = this.canvas.width / width;
+    const scaleY = this.canvas.height / height;
+    let scale = Math.min(scaleX, scaleY);
+
+    // Apply zoom out factor - reduce scale to zoom out further
+    // 0.8 means zoom out to 80% of the "perfect fit" size
+    scale = scale * 0.8;
+
+    // Clamp scale to reasonable bounds
+    // Maximum zoom in: 0.5, ensure we don't zoom in too much
+    scale = Math.min(scale, 0.5);
+
+    console.log('[GraphView] zoomToFit - bounds:', { minX, minY, maxX, maxY, width, height, scale });
+
+    // Calculate translation to center
+    const translateX = this.canvas.width / 2 - scale * centerX;
+    const translateY = this.canvas.height / 2 - scale * centerY;
+
+    // Apply transform
+    const zoom = d3.zoom();
+    const newTransform = d3.zoomIdentity
+      .translate(translateX, translateY)
+      .scale(scale);
+
+    d3.select(this.canvas)
+      .transition()
+      .duration(750)
+      .call(zoom.transform, newTransform);
+  }
+
+  /**
    * Clean up event listeners
    */
   destroy() {

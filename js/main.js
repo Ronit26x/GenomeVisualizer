@@ -1,6 +1,49 @@
 // main.js - Refactored with MVC Architecture
 // All functionality preserved, now using Model-View-Controller pattern
 
+// ===== LOADING SCREEN MANAGEMENT =====
+
+const LoadingScreen = {
+  screen: null,
+  message: null,
+  subtitle: null,
+  progressBar: null,
+
+  init() {
+    this.screen = document.getElementById('loadingScreen');
+    this.message = document.getElementById('loadingMessage');
+    this.subtitle = document.getElementById('loadingSubtitle');
+    this.progressBar = document.getElementById('loadingProgressBar');
+  },
+
+  show(message = 'Loading...', progress = 0) {
+    if (!this.screen) this.init();
+    this.screen.style.display = 'flex';
+    this.message.textContent = message;
+    this.progressBar.style.width = `${progress}%`;
+    this.subtitle.textContent = '';
+  },
+
+  update(message, progress, subtitle = '') {
+    if (!this.screen) this.init();
+    if (message) this.message.textContent = message;
+    if (progress !== undefined) this.progressBar.style.width = `${progress}%`;
+    if (subtitle !== undefined) this.subtitle.textContent = subtitle;
+  },
+
+  hide() {
+    if (!this.screen) this.init();
+    this.screen.style.display = 'none';
+    // Reset to initial state for next use
+    this.message.textContent = 'Initializing...';
+    this.subtitle.textContent = '';
+    this.progressBar.style.width = '0%';
+  }
+};
+
+// Make available globally
+window.LoadingScreen = LoadingScreen;
+
 import { exportAllPathsToFile, showExportPreviewDialog, addExportStyles } from './utils/path/path-exporter.js';
 import { importPathsFromText, showImportResultsDialog, addImportStyles } from './utils/path/path-importer.js';
 import { DotParser } from './utils/parsers/DotParser.js';
@@ -84,25 +127,37 @@ function setupUIHandlers() {
     const file = e.target.files[0];
     if (!file) return;
 
+    // Show loading screen
+    LoadingScreen.show('Reading file...', 10);
+
     const reader = new FileReader();
     reader.onload = () => {
-      parseAndLoadGraph(reader.result, file.name);
+      LoadingScreen.update('Parsing graph...', 20);
+      // Use setTimeout to allow UI to update
+      setTimeout(() => {
+        parseAndLoadGraph(reader.result, file.name);
+      }, 50);
     };
     reader.readAsText(file);
   });
 
   // Generate random graph
   document.getElementById('genRandom').onclick = () => {
-    controller.generateRandomGraph(50);
-    legacy.currentFormat = 'dot';
-    if (window.updateUIForFormat) {
-      window.updateUIForFormat('dot');
-    }
+    // Show loading screen briefly for random graph
+    LoadingScreen.show('Generating random graph...', 30);
+
+    setTimeout(() => {
+      controller.generateRandomGraph(50);
+      legacy.currentFormat = 'dot';
+      if (window.updateUIForFormat) {
+        window.updateUIForFormat('dot');
+      }
+    }, 50);
   };
 
-  // Reset view
+  // Reset view - zoom to fit all nodes
   document.getElementById('resetView').onclick = () => {
-    controller.resetView();
+    view.zoomToFit(80);
   };
 
   // Pin selected nodes
@@ -236,6 +291,7 @@ function parseAndLoadGraph(text, filename) {
   }
 
   logEvent(`Parsing ${format} graph from ${filename}`);
+  LoadingScreen.update(`Parsing ${format.toUpperCase()} format...`, 30);
 
   // Use new parsers
   let parsed;
@@ -247,13 +303,17 @@ function parseAndLoadGraph(text, filename) {
     parsed = gfaParser.parse(text, logEvent);
   }
 
+  LoadingScreen.update('Validating graph structure...', 50, `${parsed.nodes.length} nodes, ${parsed.links.length} edges`);
+
   // Filter out invalid links
   const nodeSet = new Set(parsed.nodes.map(n => n.id));
   const validLinks = parsed.links.filter(l =>
     nodeSet.has(l.source) && nodeSet.has(l.target)
   );
 
-  // Load into MVC system
+  LoadingScreen.update('Initializing layout...', 60, `Preparing ${parsed.nodes.length} nodes`);
+
+  // Load into MVC system (will continue loading screen updates)
   controller.loadGraph(parsed.nodes, validLinks, format);
 
   logEvent(`✓ Loaded ${parsed.nodes.length} nodes, ${validLinks.length} links`);
